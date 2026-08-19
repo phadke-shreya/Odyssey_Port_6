@@ -91,15 +91,29 @@ def test_non_pdf_is_rejected(tmp_path):
 
 
 @needs_scan
-def test_image_only_page_is_reported_not_dropped():
-    """A scanned page must leave a visible trace the user can act on."""
+def test_scanned_page_is_never_silently_dropped():
+    """A page with no text layer must always leave a trace.
+
+    The invariant is representation, not a particular kind: with OCR available the
+    page becomes OCR text, and without it a placeholder saying so. What must never
+    happen is the page vanishing, because a reader would then have no way to know
+    part of the document was not indexed.
+
+    The two branches are tested individually in test_ocr.py.
+    """
     blocks = parse_pdf(SCAN)
 
-    kinds = [b.content_type for b in blocks]
-    assert ContentType.IMAGE_ONLY in kinds
-    placeholder = next(b for b in blocks if b.content_type is ContentType.IMAGE_ONLY)
-    assert "image or scanned page" in placeholder.text
-    assert placeholder.page == 1
+    assert blocks, "the scanned page produced nothing at all"
+    kinds = {b.content_type for b in blocks}
+    assert kinds & {ContentType.OCR, ContentType.IMAGE_ONLY}, kinds
+
+    block = blocks[0]
+    assert block.page == 1
+    if block.content_type is ContentType.IMAGE_ONLY:
+        assert "image or scanned page" in block.text
+    else:
+        # OCR is imperfect, so check for recovered content, not a transcript.
+        assert "bangalore" in block.text.lower()
 
 
 @needs_tables
