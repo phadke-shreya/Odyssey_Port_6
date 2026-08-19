@@ -120,10 +120,10 @@ not comparable, and the app will refuse to query a mismatched database.
 You should see a summary like:
 
 ```
-Ingest finished in 21.3s
-  chunks in database     : 1819
-  documents in database  : 4
-  embedding model        : local:all-MiniLM-L6-v2
+Ingest finished in 47.8s
+  chunks in database     : 3156
+  documents in database  : 5
+  embedding model        : openai:text-embedding-3-small
 ```
 
 ---
@@ -172,7 +172,7 @@ curl -X POST http://127.0.0.1:8006/ask \
 ## Tests
 
 ```bash
-pytest -q                            # 164 tests
+pytest -q                            # 165 tests
 black --check app tests eval tools   # formatting
 ruff check app tests eval tools      # linting
 python tools/check_conventions.py    # the conventions in CLAUDE.md
@@ -246,7 +246,7 @@ app/
   main.py          FastAPI endpoints
 streamlit_app.py   the UI (display only; calls the API over HTTP)
 ingest.py          load every PDF in documents/
-tests/             164 tests, including architecture boundaries
+tests/             165 tests, including architecture boundaries
 eval/              questions.json + run_eval.py (retrieval metrics)
 .github/workflows/ CI: lint, build the index, test, measure retrieval
 documents/         your PDFs
