@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check formatting
+        run: black --check app tests eval streamlit_app.py ingest.py
+
+      - name: Lint
+        run: ruff check app tests eval streamlit_app.py ingest.py
+
+      # Build the index with the LOCAL embedding model so CI needs no API key.
+      # This exercises the whole pipeline -- parse, chunk, embed, persist -- on
+      # every push, not just the unit tests.
+      - name: Build the index
+        env:
+          EMBEDDING_PROVIDER: local
+        run: python ingest.py --reset
+
+      - name: Run tests
+        env:
+          EMBEDDING_PROVIDER: local
+        run: pytest -q
+
+      # Retrieval quality is a number, so a regression should fail the build
+      # rather than be noticed later by eye.
+      - name: Measure retrieval quality
+        env:
+          EMBEDDING_PROVIDER: local
+        run: python eval/run_eval.py
