@@ -8,13 +8,9 @@ retrieval design rests on.
 import pytest
 
 from app import config
-from app.chunker import (
-    Block,
-    ContentType,
-    chunk_document,
-    heading_depth,
-    looks_like_heading,
-)
+from app.chunker import chunk_document
+from app.headings import heading_depth, is_title_case, looks_like_heading
+from app.models import Block, ContentType
 
 TABLE_MARKDOWN = (
     "Table from HR_Policy.pdf p4, section 3.1 Leave: entitlement by role\n"
@@ -218,8 +214,6 @@ def test_real_world_headings_still_detected(line: str) -> None:
 
 
 def test_title_case_separates_titles_from_sentences() -> None:
-    from app.chunker import is_title_case
-
     assert is_title_case("Remote Work Policy") is True
     assert is_title_case("Depositing Taxes") is True
     assert is_title_case("If your spouse itemizes deductions") is False

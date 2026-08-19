@@ -205,7 +205,8 @@ def test_a_long_ocr_paragraph_is_still_size_limited() -> None:
 
 def test_ocr_children_keep_the_whole_page_as_parent() -> None:
     """Split for search, whole for answering -- the parent/child rule."""
-    from app.chunker import Block, chunk_document
+    from app.chunker import chunk_document
+    from app.models import Block
 
     text = (
         "ACME CORP - INTERNAL NOTICE\n\n"

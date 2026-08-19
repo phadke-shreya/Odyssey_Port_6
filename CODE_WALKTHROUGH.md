@@ -9,7 +9,7 @@ numbers on. For the concepts behind it, read [EXPLAINER.md](EXPLAINER.md) first.
 models.py + config.py     (depend on nothing)
       |
       v
-chunker.py   pdf_parser.py   vector_store.py   rag_chain.py
+headings.py  ->  chunker.py   pdf_parser.py   vector_store.py   rag_chain.py
       |
       v
 main.py  ->  streamlit_app.py
@@ -81,13 +81,47 @@ find. One home means it cannot drift.
 | `76` | `MIN_HEADINGS_FOR_SECTIONS = 3` — below this, fall back to size-based parents. |
 | `79` | `MAX_HEADING_CHARS = 80` — a heading is short. |
 | `82` | `MIN_CHARS_FOR_TEXT_PAGE = 100` — a page with less is almost certainly a scan. |
-| `~88-92` | `CHUNK_WARN_CHARS` — a **conditional expression**, not a constant, because how much text an embedding model can read is a property of the model: ~1000 chars locally, ~30000 hosted. |
+| `83-91` | `CHUNK_WARN_CHARS` — a **conditional expression**, not a constant, because how much text an embedding model can read is a property of the model: ~1000 chars locally, ~30000 hosted. |
 | `94-95` | `TOP_K_CHILDREN = 8`, `TOP_K_PARENTS = 4`. Fetching 8 to keep 4 leaves room for several children sharing one parent. |
-| `~100-131` | **`MAX_DISTANCE`, keyed by MODEL NAME.** The most easily-broken setting in the project. The comment records the measured numbers: `nomic-embed-text` needs 0.375, `text-embedding-3-small` needs 0.52 — 40% apart on the same corpus. Running one at the other's value made the app refuse **10 of 23 answerable questions**. Unlisted models fall back to a permissive default, favouring answering over refusing. |
+| `123-157` | **`MAX_DISTANCE`, keyed by MODEL NAME.** The most easily-broken setting in the project. The comment records the measured numbers: `nomic-embed-text` needs 0.375, `text-embedding-3-small` needs 0.52 — 40% apart on the same corpus. Running one at the other's value made the app refuse **10 of 23 answerable questions**. Unlisted models fall back to a permissive default, favouring answering over refusing. |
 | `134-135` | `MAX_QUERY_CHARS`, `MAX_UPLOAD_BYTES` — the latter written as `25 * 1024 * 1024` so a reader sees "25 MB" rather than decoding `26214400`. |
 | `138` | `API_URL` — where the UI finds the API. `.rstrip("/")` prevents a double slash when paths are appended. |
 | `141-152` | **`embedding_fingerprint()`** — e.g. `"openai:text-embedding-3-small"`. Stamped into the collection so a mismatch is detected. The docstring explains why: querying with the wrong model does not raise, it silently returns confident nonsense. |
-| `155-167` | **`missing_credentials()`** — returns a problem description or `""`. A *string* rather than an exception, so the caller decides what to do. A key is only required when `EMBEDDING_PROVIDER == "openai"`. |
+| `181-193` | **`missing_credentials()`** — returns a problem description or `""`. A *string* rather than an exception, so the caller decides what to do. A key is only required when `EMBEDDING_PROVIDER == "openai"`. |
+
+---
+
+# `app/headings.py` — is this line a heading?
+
+**Why this file exists:** it answers a different question from the chunker. The
+chunker asks *"where should this document be cut"*; this file only ever answers
+*"is this one line a heading"*. Because it takes a string and returns a verdict, it
+is testable on bare strings — and most of the regression tests in the suite are
+single lines copied out of real PDFs.
+
+It is also the fiddliest logic in the project. The first version found **120
+"headings"** in two documents and essentially every one was wrong. The comment at
+`18-23` states the governing principle: **a wrong section label in a citation is
+worse than no label**, so every rule below errs toward saying "not a heading".
+
+| Lines | What it does |
+|---|---|
+| `1-13` | Docstring: what the module does, why it was split out, and the 120-false-positive history. |
+| `17` | Imports: `re`, and `config` for `MAX_HEADING_CHARS`. Nothing else — that is the whole point. |
+| `26` | `_MULTI_LEVEL_HEADING` — matches `5.2 Remote Work`. Reading the regex: `^` start, `(\d+(?:\.\d+)+)` a number with **at least one** dot-group (so `5.2`, `5.2.1` — but not bare `5`), `\.?` an optional trailing dot, `\s+` whitespace, `([A-Z].*)` text starting with a capital, `$` end. |
+| `30` | `_SINGLE_LEVEL_HEADING` — matches `1. Introduction`. The trailing dot after `(\d+)` is **required**. Without it, page footers like `8 Publication 15 (2026)` matched — the bug that produced those 120 fake headings. |
+| `33-36` | `_KEYWORD_HEADING` — `SECTION 4`, `Article 3`. `[0-9IVXLC]+` allows Roman numerals; `re.IGNORECASE` so case does not matter. |
+| `39` | `_SENTENCE_END` — a tuple of punctuation. A real heading almost never ends with a full stop or comma. |
+| `42-66` | `_SMALL_WORDS` — words ignored when judging Title Case ("of", "the", "and"). `frozenset` because it never changes and set membership is fast. |
+| `68` | `_WORDS` — finds words: `[A-Za-z]` first character, then letters, apostrophes (including the curly `’`) and hyphens. |
+| `74` | `_DOT_LEADER` — matches `. . .`, the dotted line in a table of contents. TOC entries duplicate real headings, so they are rejected. |
+| `77` | `_ROMAN_NUMERAL` — so `IV.` is not mistaken for a numbered section. |
+| `83-127` | `_GENERIC_LABELS` — ALL-CAPS words that label a *part* of a section rather than naming a topic. Standards documents repeat `DISCUSSION` under every requirement; a citation reading `page 44 \| DISCUSSION` tells the reader nothing. |
+| `130-144` | **`is_title_case()`** — the rule that separates a heading from a list item. Find the words, keep only "significant" ones (3+ letters, not a small word), return False if none survive, count the capitalised ones, and return True at **60% or more**. So `"Remote Work Policy"` → 3/3 = 100% ✅, while `"If your spouse itemizes deductions"` → 1/4 = 25% ❌. |
+| `147-154` | **`is_numbered_heading()`** — tries multi-level first, then single. `or` returns the first truthy result, or `None`. Public rather than private because the chunker needs the same judgement when deciding whether a heading may be nested. |
+| `157-211` | **`looks_like_heading()`** — a gauntlet of rejections, cheapest first: empty or too long; ends like a sentence; ends with a hyphen (a word split across lines, so a fragment); contains a comma; contains a slash (print artifacts like `AH XSL/XML`); is a TOC line. Then: if numbered, it is a heading **only if** the text after the number is Title Case. A keyword heading must either have nothing after the number (`SECTION 4`) or Title-Case text — this rejects `"Section 3509 rates aren't available..."`. Finally ALL-CAPS lines: must be all uppercase letters, must not be only generic labels, and must have 2+ words or one word of 6+ letters (which rejects the acronym `UTC`). |
+| `214-223` | **`heading_depth()`** — counts dot-separated parts: `5` → 1, `5.2` → 2, `5.2.1` → 3. Used to nest the breadcrumb. |
+| `226-232` | **`build_breadcrumb()`** — joins the trail with `>`. Takes `(depth, text)` pairs and keeps only the text. |
 
 ---
 
@@ -96,57 +130,49 @@ find. One home means it cannot drift.
 **Why this file exists:** turning a document into pieces is where the quality of a
 RAG system is decided. Everything downstream can only be as good as this.
 
-### Setting up (lines 1–59)
+The file reads bottom-up: the small helpers first, then the three per-content-type
+builders, then `chunk_document` at the end tying them together. If you only read
+one function, read that one — it is the strategy in 12 lines of code.
+
+### Grouping text into parents (lines 30–158)
 
 | Lines | What it does |
 |---|---|
 | `1-12` | Docstring stating the whole strategy in one paragraph, including the deliberate table exception. |
-| `14-21` | Imports. `re` for regex, `dataclass` for tidy data holders, `StrEnum` for the content types, `RecursiveCharacterTextSplitter` from LangChain, and our own `config`. |
-| `23` | `logger = logging.getLogger(__name__)` — `__name__` is `"app.chunker"`, so log lines say which module they came from. |
-| `26-31` | **`ContentType`** — `StrEnum` means the members *are* strings, so `ContentType.TABLE == "table"` is `True`. That lets the value go straight into a database field with no conversion. |
-| `34-40` | **`Block`** — one piece of a parsed page: its text, its page number, and its kind. This is the hand-off shape between `pdf_parser` and `chunker`. |
-| `43-58` | **`Chunk`** — a *child*, the thing that gets embedded. Note `parent_text` (line 54): each child **carries a full copy of its parent**. That is deliberate — it means retrieval needs no second lookup, and the parent survives a restart because ChromaDB writes metadata to disk. Slight duplication, one fewer moving part. |
+| `14-27` | Imports: LangChain's `RecursiveCharacterTextSplitter`, `config`, the four heading functions from `headings.py`, and the data types from `models.py`. `logger = logging.getLogger(__name__)` gives log lines the module name they came from. |
+| `30-52` | **`_explode_long_lines()`** — grouping works on *lines*, so one enormous paragraph with no newlines could never be split. This pre-splits any line longer than a whole parent, and each piece **keeps its page number**. A test caught this: an 8800-character paragraph sailed straight past the size cap. |
+| `55-97` | **`_emit_parent()`** — turns accumulated `(line, page)` pairs into parents. Explode long lines first; walk the lines accumulating a batch; when adding the next line would exceed `PARENT_MAX_CHARS`, close the batch and start a new one **with the new line's page**; flush the last batch; drop empties. If a section became several parents, label them `(part 2 of 5)` so a citation says which piece. **The page-per-line tracking here fixed a real bug**: previously every part claimed the heading's page, so text on page 30 was cited as page 1. |
+| `100-158` | **`_prose_parents()`** — the main grouping loop. Flatten all blocks into `(line, page)` pairs, preserving order. Count headings; **if fewer than 3, give up on sections entirely** and return size-based parents with no label. Then walk every line: if it is a heading, close the current parent and fix the trail — a numbered heading must not sit under an unnumbered one (this fixed `REFERENCES > 03.05.03 Multi-Factor Authentication`, which wrongly implied the requirement lived in References); an unnumbered heading resets the trail; **drop every entry at this depth or deeper**, because those are siblings or children, not ancestors (this fixed `3.1 Access Control > 3.5 Identification`, where two siblings were wrongly nested). Otherwise just add the line to the current parent. |
 
-### Heading detection (lines 61–232)
-
-This is the fiddliest part of the project, and the comment at `61-65` explains the
-governing principle: **a wrong section label in a citation is worse than no label**,
-so every rule errs toward saying "not a heading".
+### Slicing parents into children (lines 161–217)
 
 | Lines | What it does |
 |---|---|
-| `68` | `_MULTI_LEVEL_HEADING` — matches `5.2 Remote Work`. Reading the regex: `^` start, `(\d+(?:\.\d+)+)` a number with **at least one** dot-group (so `5.2`, `5.2.1` — but not bare `5`), `\.?` an optional trailing dot, `\s+` whitespace, `([A-Z].*)` text starting with a capital, `$` end. |
-| `72` | `_SINGLE_LEVEL_HEADING` — matches `1. Introduction`. The trailing dot after `(\d+)` is **required**. Without it, page footers like `8 Publication 15 (2026)` matched — a real bug that produced 120 fake headings. |
-| `75-78` | `_KEYWORD_HEADING` — `SECTION 4`, `Article 3`. `[0-9IVXLC]+` allows Roman numerals. `re.IGNORECASE` so case does not matter. |
-| `81` | `_SENTENCE_END` — a tuple of punctuation. A real heading almost never ends with a full stop or comma. |
-| `84-108` | `_SMALL_WORDS` — words ignored when judging Title Case ("of", "the", "and"). `frozenset` because it never changes and set membership is fast. |
-| `110` | `_WORDS` — finds words. `[A-Za-z]` first character, then letters, apostrophes (including the curly `’`) and hyphens. |
-| `115` | `_DOT_LEADER` — matches `. . .`, the dotted line in a table of contents. TOC entries duplicate real headings, so they are rejected. |
-| `121-149` | `_GENERIC_LABELS` — ALL-CAPS words that label a *part* of a section rather than naming a topic. Standards documents repeat `DISCUSSION` under every requirement; a citation reading `page 44 \| DISCUSSION` tells the reader nothing. |
-| `152-164` | **`is_title_case()`** — the rule that separates a heading from a list item. Line `159` finds words; `160` keeps only "significant" ones (3+ letters, not a small word); `161-162` returns False if none; `163` counts capitalised ones; `164` returns True if **60% or more** are capitalised. So `"Remote Work Policy"` → 3/3 = 100% ✅, while `"If your spouse itemizes deductions"` → 1/4 = 25% ❌. |
-| `167-169` | `_numbered_match()` — tries multi-level first, then single. `or` returns the first truthy result, or `None`. |
-| `172-220` | **`looks_like_heading()`** — a gauntlet of rejections, cheapest first: `181` empty or too long, `183` ends like a sentence, `187` ends with a hyphen (a word split across lines, so a fragment), `190` contains a comma, `193` contains a slash (print artifacts like `AH XSL/XML`), `196` is a TOC line. Then `199-201` if numbered, it is a heading **only if** the text after the number is Title Case. `203-208` a keyword heading must either have nothing after the number (`SECTION 4`) or Title-Case text — this rejects `"Section 3509 rates aren't available..."`. `210-220` finally, ALL-CAPS lines: must be all uppercase letters, must not be only generic labels, and must have 2+ words or one word of 6+ letters (which rejects the acronym `UTC`). |
-| `223-232` | **`heading_depth()`** — counts dot-separated parts: `5` → 1, `5.2` → 2, `5.2.1` → 3. Used to nest the breadcrumb. |
+| `161-173` | **`_children_for()`** — slices a parent into children. The `separators` list is the priority order: paragraph break, newline, sentence end, space, and `""` (mid-word) only as a last resort. `chunk_overlap` makes each child repeat the tail of the previous one, so a fact landing on a cut line survives whole in at least one child. |
+| `176-217` | **`_children_for_ocr()`** — a *different* splitter for scanned pages, and the docstring carries the measurement that justifies it. A scan is often a list of unrelated single lines rather than flowing prose, so packing them into one 400-character child blurs its embedding across every fact in it. Measured on one real page: the query "when must employees collect their laptops?" scored **0.582** against the whole page (refused) and **0.229** against just the sentence that answers it (retrieved) — a dilution cost of 0.353, more than the entire margin of the relevance threshold. So the page's own paragraph breaks decide the cuts, and anything too short to stand alone is joined to its neighbour instead of becoming a chunk nobody can retrieve. |
 
-### Building parents and children (lines 235–386)
+### One builder per content type (lines 220–327)
+
+This is the mentor's point made literal: **the split logic is different for prose,
+for OCR, and for tables**, so it is three functions rather than three branches
+inside one.
 
 | Lines | What it does |
 |---|---|
-| `235-241` | **`build_breadcrumb()`** — joins the trail with `>`. Takes `(depth, text)` pairs and keeps only the text. |
-| `244-266` | **`_explode_long_lines()`** — grouping works on *lines*, so one enormous paragraph with no newlines could never be split. This pre-splits any line longer than a whole parent. Each piece **keeps its page number** (line `265`). A test caught this: an 8800-character paragraph sailed past the size cap. |
-| `269-311` | **`_emit_parent()`** — turns accumulated `(line, page)` pairs into parents. `280` explode long lines first. `287-296` walk the lines accumulating a batch; when adding the next line would exceed `PARENT_MAX_CHARS`, close the batch and start a new one **with the new line's page** (line `291`). `298-299` flush the last batch. `301` drop empties. `305-310` if a section became several parents, label them `(part 2 of 5)` so a citation says which piece. **The page-per-line tracking here fixed a real bug**: previously every part claimed the heading's page, so text on page 30 was cited as page 1. |
-| `314-371` | **`_prose_parents()`** — the main grouping loop. `322-325` flatten all blocks into `(line, page)` pairs, preserving order. `327-333` count headings; **if fewer than 3, give up on sections entirely** and return size-based parents with no label. `339` the trail as `(depth, text)` pairs. `343-366` walk every line: if it is a heading, close the current parent, then fix the trail — `353-354` a numbered heading must not sit under an unnumbered one (this fixed `REFERENCES > 03.05.03 Multi-Factor Authentication`, which wrongly implied the requirement lived in References); `355-356` an unnumbered heading resets the trail; `360-361` **pop every entry at this depth or deeper**, because those are siblings or children, not ancestors (this fixed `3.1 Access Control > 3.5 Identification`, where two siblings were wrongly nested). Otherwise `366` just add the line to the current parent. |
-| `374-386` | **`_children_for()`** — slices a parent into children. The `separators` list is the priority order: paragraph break, newline, sentence end, space, and `""` (mid-word) only as a last resort. `chunk_overlap` makes each child repeat the tail of the previous one, so a fact landing on a cut line survives whole in at least one child. |
+| `220-235` | **`_ParentIds`** — hands out `"handbook.pdf::p7"`, one id per parent. A tiny class rather than a counter threaded through three functions, so the builders below cannot accidentally reuse an id — which would silently merge two unrelated sections during de-duplication. |
+| `238-261` | **`_chunks_from_prose()`** — section parents, sliced into small children. Every child of one parent carries the **same** `parent_text` and `parent_id`; that shared id is what de-duplication uses later. |
+| `264-287` | **`_chunks_from_ocr()`** — one parent **per page**, because a scan has no headings to group by, sliced with the OCR-specific splitter. |
+| `290-322` | **`_chunks_from_whole_blocks()`** — tables and image placeholders, one chunk each. Warns first if a block exceeds the embedding model's input window: that is how you find out a big table is being silently truncated. Then creates **one** chunk where `text` and `parent_text` are **the same value**. That is the table rule in code: its own parent, its own only child, never sliced. |
+| `325-327` | **`_of_type()`** — the blocks matching any of the given content types, in document order. One line, but it keeps the three calls below readable. |
 
-### The entry point (lines 389–463)
+### The entry point (lines 330–368)
 
 | Lines | What it does |
 |---|---|
-| `407-408` | Refuse empty input loudly. An empty document is a caller bug, not something to paper over. |
-| `415-416` | Split blocks: prose is grouped **across** blocks so a section can span a page break; tables and image placeholders are handled one at a time. `is` compares identity, which is correct for enum members. |
-| `418-433` | For each prose parent: `420-421` build a unique `parent_id` like `"p15.pdf::p7"`; `422` slice into children; `423-433` create one `Chunk` per child, every one carrying the **same** `parent_text` and `parent_id`. That shared id is what de-duplication uses later. |
-| `435-460` | For each table / image block: `438-447` warn if it exceeds the embedding model's window — this is how you learn that a big table is being silently truncated. `450-460` create **one** chunk where `text` and `parent_text` are **the same value**. That is the table rule in code: its own parent, its own only child, never sliced. |
-| `462-463` | Log the count and return. |
+| `330-349` | Docstring listing the three strategies side by side. This is the answer to "is your chunking intentional?" |
+| `350-351` | Refuse empty input loudly. An empty document is a caller bug, not something to paper over. |
+| `353-365` | One `_ParentIds` shared across all three builders, then prose, then OCR, then whole blocks — each fed only the blocks of its own type. |
+| `367-368` | Log the count and return. |
 
 ---
 
@@ -159,12 +185,12 @@ like any other page — chunked, embedded, retrieved, cited and quotable.
 | Lines | What it does |
 |---|---|
 | `1-16` | Docstring stating the two principles: OCR is a **fallback**, never the first choice; and **low-confidence OCR is worse than none**, because garbled text gets quoted back as if the document said it. |
-| `~24` | `_availability_logged` — module-level flag so a missing binary is reported **once**, not on every page of every document. |
-| `~28-48` | **`OcrResult`** — text plus a confidence score out of 100. `usable` requires **both** enough characters and enough confidence: a handful of characters is not worth a chunk, and low-confidence output is actively harmful. |
-| `~51-76` | **`available()`** — checks rather than assumes. `pytesseract` is a thin wrapper around a binary, so the import succeeding proves nothing; it calls `get_tesseract_version()`. The error message names the install command for both macOS and Linux. |
-| `~79-118` | **`reconstruct_layout()`** — rebuilds lines and paragraphs from Tesseract's per-word `block_num` / `par_num` / `line_num`. **This exists because of a real bug:** joining every word with a space flattened the page to one line, and since the chunker cuts on paragraph breaks first, a whole page then became one chunk no matter how many separate facts it held. |
-| `~121-146` | **`_mean_confidence()`** — averages per-word confidence, skipping Tesseract's blank boxes (which report `-1`). Including them would drag the average down and make good OCR look unusable. |
-| `~149-190` | **`ocr_page()`** — renders at `OCR_DPI` and reads the text. Every failure path returns empty text with zero confidence **rather than raising**: a page that cannot be OCR'd should fall back to being reported unreadable, not break the document. |
+| `28` | `_availability_logged` — module-level flag so a missing binary is reported **once**, not on every page of every document. |
+| `32-49` | **`OcrResult`** — text plus a confidence score out of 100. `usable` requires **both** enough characters and enough confidence: a handful of characters is not worth a chunk, and low-confidence output is actively harmful. |
+| `52-75` | **`available()`** — checks rather than assumes. `pytesseract` is a thin wrapper around a binary, so the import succeeding proves nothing; it calls `get_tesseract_version()`. The error message names the install command for both macOS and Linux. |
+| `78-116` | **`reconstruct_layout()`** — rebuilds lines and paragraphs from Tesseract's per-word `block_num` / `par_num` / `line_num`. **This exists because of a real bug:** joining every word with a space flattened the page to one line, and since the chunker cuts on paragraph breaks first, a whole page then became one chunk no matter how many separate facts it held. |
+| `119-138` | **`_mean_confidence()`** — averages per-word confidence, skipping Tesseract's blank boxes (which report `-1`). Including them would drag the average down and make good OCR look unusable. |
+| `141-172` | **`ocr_page()`** — renders at `OCR_DPI` and reads the text. Every failure path returns empty text with zero confidence **rather than raising**: a page that cannot be OCR'd should fall back to being reported unreadable, not break the document. |
 
 **Where it is called:** `pdf_parser.parse_pdf()` tries OCR only when a page has
 almost no extractable text *and* no table. That keeps ingest fast — a 205-page
@@ -246,20 +272,32 @@ would destroy the point of embeddings — *"vacation days"* must still find
 *"annual leave"*. Named entities are the narrow case where absence really is
 evidence.
 
-### `search()` (lines 328–411)
+### The retrieval passes (lines 309–399)
+
+`search()` used to be one 83-line function doing all of this inline. It was split
+because a reviewer reading it could not see the shape of the algorithm for the
+bookkeeping — and the two passes really do answer different questions.
 
 | Lines | What it does |
 |---|---|
-| `~336-345` | Validate: empty and over-long questions raise `ValueError` with a readable sentence. |
-| `~349-351` | An empty database returns `[]` rather than erroring. |
-| `~353-358` | The vector query, for `TOP_K_CHILDREN` children. `min(..., count())` avoids asking for more than exist. |
-| `~366-372` | **Pass 1** — literal matches first. An exact hit on `03.05.03` is not a guess, so it is **exempt from the distance threshold** and gets `match_type="exact"`. |
-| `~375-384` | **Pass 2** — semantic matches, gated by distance. An existing exact match for the same parent is never overwritten. |
-| `~387-389` | Rank exact matches first, then semantic by distance. |
-| `~395-404` | **Guard 2** — if the question names an entity nothing retrieved mentions, return `[]`. Exempt when an exact identifier matched, since that is already proof the right chunk was found. |
-| `~411` | Return at most `TOP_K_PARENTS`. |
+| `309-324` | **`_validated()`** — empty and over-long questions raise `ValueError` with a sentence a user can act on. Returns the stripped question, so the caller cannot forget to use the cleaned form. |
+| `327-342` | **`_literal_pass()`** — exact identifier matches, added to the `best` dict in place. An exact hit on `03.05.03` is not a guess, so it is **exempt from the distance threshold** and recorded at distance `0.0`, which makes it sort above anything semantic. |
+| `345-374` | **`_semantic_pass()`** — the vector query for `TOP_K_CHILDREN` children (`min(..., count())` avoids asking for more than exist), then nearest-neighbour matches gated by `MAX_DISTANCE`. Only the nearest hit per parent is kept, and an exact match already in `best` is never overwritten. Returns how many children were examined, purely so the log line can report it. |
+| `377-399` | **`_names_something_absent()`** — **Guard 2** as a named predicate. True when the question names an entity no retrieved section mentions, which is when a close distance is not an answer. Exempt when an exact identifier matched, since that is already proof the right chunk was found. |
 
-### `stats()` (lines 414–435)
+### `search()` (lines 402–448)
+
+| Lines | What it does |
+|---|---|
+| `402-427` | Docstring: the two passes, in order, and why that order. |
+| `428` | Validate. |
+| `430-433` | An empty database returns `[]` rather than erroring. |
+| `435-439` | `best` is keyed by parent id, so one section appears once no matter how many of its children matched. Literal pass first, then semantic. |
+| `441-443` | Rank exact matches first, then semantic by distance. |
+| `444-445` | Apply the entity guard; refuse by returning `[]`. |
+| `447-448` | Log, then return at most `TOP_K_PARENTS`. |
+
+### `stats()` (lines 451–472)
 
 Wrapped in a broad `except` because **a health check must never crash**; it
 returns zeros instead. Samples up to 5000 chunks to collect the document names.
@@ -283,7 +321,7 @@ not know ChromaDB exists — it receives already-retrieved sections.
 | `226-241` | **`_strip_contradictory_hedge()`** — removes a trailing "I don't know" that follows a real answer. `235-236` `position <= 0` means either not found (`-1`) or at the very start (`0`, a genuine refusal) — both are left alone. `238-239` if less than 40 characters preceded it, treat the whole thing as a refusal rather than an answer. |
 | `247-260` | **`_strip_document_markers()`** — deletes `[50]`-style markers the model copied from the source. Safe by construction: valid citations are `(Source N)`, so any `[digits]` is by definition an artifact. `260` also tidies the double spaces left behind. |
 | `265-280` | **`_strip_echoed_source_header()`** — drops `Source 2: file.pdf \| page 55 \| ...` lines the model copied. `re.MULTILINE` makes `^` match at each line start. `276-277` **if stripping left nothing, return the original** — never show an empty answer just because it was badly formatted. |
-| `287-304` | **`_normalise_citations()`** — rewrites `[Source 2]`, `Source 2`, `(source 2)` all as `(Source 2)`. Two regex alternatives on purpose (`288`): the bracketed form may have padding inside the brackets, but the bare form must **not** swallow the spaces around it — a bug the tests caught, which produced `see(Source 3)for detail`. `300-302` `group(1) or group(2)` picks whichever alternative matched. |
+| `281-294` | **`_normalise_citations()`** — rewrites `[Source 2]`, `Source 2`, `(source 2)` all as `(Source 2)`. Two regex alternatives on purpose (`276-278`): the bracketed form may have padding inside the brackets, but the bare form must **not** swallow the spaces around it — a bug the tests caught, which produced `see(Source 3)for detail`. `289-292` `group(1) or group(2)` picks whichever alternative matched. |
 
 ---
 
@@ -345,12 +383,12 @@ endpoints could serve a Slack bot.
 **"Why parent/child instead of one chunk size?"**
 > Searching wants small chunks for a sharp match; answering wants big ones for
 > context. Two sizes gets both: children are embedded, parents are what the model
-> reads. `vector_store.search()` lines 218–233 is where a matched child is
-> expanded to its parent and duplicates are dropped.
+> reads. `vector_store._semantic_pass()` (lines 345–374) is where a matched
+> child is expanded to its parent and duplicates are dropped, keyed by parent id.
 
 **"How do you stop it making things up?"**
-> Two layers. `vector_store.search()` line 220 drops anything beyond
-> `MAX_DISTANCE`, and `rag_chain.answer_question()` line 180 returns "I don't
+> Two layers. `vector_store._semantic_pass()` line 364 drops anything beyond
+> `MAX_DISTANCE`, and `rag_chain.answer_question()` line 171 returns "I don't
 > know" **without calling the model at all** when nothing survives. The prompt
 > also forbids outside knowledge, but that is the second line of defence, not the
 > first.

@@ -12,225 +12,19 @@ See plan.md section 4 for the full reasoning.
 """
 
 import logging
-import re
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app import config
+from app.headings import (
+    build_breadcrumb,
+    heading_depth,
+    is_numbered_heading,
+    looks_like_heading,
+)
 from app.models import Block, Chunk, ContentType
 
 logger = logging.getLogger(__name__)
-
-
-# Heading detection is deliberately HIGH PRECISION. Real documents are full of
-# things that look like headings but are not: numbered list items, page footers,
-# wrapped sentence fragments, print artifacts. A WRONG section label in a
-# citation is worse than no label -- and missing a heading is safe, because the
-# caller falls back to size-based parents. So every rule below errs toward "no".
-
-# "5.2 Remote Work Policy" / "5.2.1 Equipment" -- multi-level, dot optional.
-_MULTI_LEVEL_HEADING = re.compile(r"^(\d+(?:\.\d+)+)\.?\s+([A-Z].*)$")
-
-# "1. Introduction" -- single level, the trailing dot is REQUIRED. Without that
-# requirement, page footers like "8 Publication 15 (2026)" match.
-_SINGLE_LEVEL_HEADING = re.compile(r"^(\d+)\.\s+([A-Z].*)$")
-
-# "SECTION 4", "Article 3:", "Chapter 12".
-_KEYWORD_HEADING = re.compile(
-    r"^(SECTION|ARTICLE|CHAPTER|PART|APPENDIX)\s+([0-9IVXLC]+)\b(.*)$",
-    re.IGNORECASE,
-)
-
-# Sentence-ending punctuation. A real heading almost never ends this way.
-_SENTENCE_END = (".", "!", "?", ",", ";", ":")
-
-# Words that do not count when judging Title Case.
-_SMALL_WORDS = frozenset(
-    {
-        "a",
-        "an",
-        "the",
-        "of",
-        "and",
-        "or",
-        "for",
-        "to",
-        "in",
-        "on",
-        "at",
-        "by",
-        "with",
-        "from",
-        "as",
-        "is",
-        "are",
-        "not",
-        "but",
-        "if",
-        "you",
-    }
-)
-
-_WORDS = re.compile(r"[A-Za-z][A-Za-z'\u2019-]*")
-
-
-# Dot leaders ". . . . 14" mark a table-of-contents entry. The same heading
-# appears again in the body, so indexing the TOC version just adds a duplicate
-# with a page number stuck on the end.
-_DOT_LEADER = re.compile(r"\.\s*\.\s*\.")
-
-# Roman numerals, so "STEP I" and "PART IV" are judged on their word alone.
-_ROMAN_NUMERAL = re.compile(r"[IVXLCDM]+")
-
-# ALL-CAPS words that label a PART of a section rather than naming a topic.
-# Many standards documents repeat these under every requirement, and using them
-# as breadcrumbs produces citations like "page 44 | DISCUSSION", which tells the
-# reader nothing about where they are.
-_GENERIC_LABELS = frozenset(
-    {
-        "DISCUSSION",
-        "REFERENCES",
-        "EXAMPLES",
-        "EXAMPLE",
-        "NOTE",
-        "NOTES",
-        "PURPOSE",
-        "SCOPE",
-        "SUMMARY",
-        "OVERVIEW",
-        "BACKGROUND",
-        "GENERAL",
-        "INTRODUCTION",
-        "CONTENTS",
-        "APPENDIX",
-        "GLOSSARY",
-        "INDEX",
-        "ACKNOWLEDGEMENTS",
-        "ACKNOWLEDGMENTS",
-        "ABSTRACT",
-        "KEYWORDS",
-        "AUDIENCE",
-        "DEFINITIONS",
-        "REQUIREMENTS",
-        "DISCLAIMER",
-        # Seen repeating on every page of a real HR policy manual and a lab
-        # safety SOP. As breadcrumbs they are worse than nothing: every
-        # citation would read "page 7 | POLICY".
-        "STATEMENT",
-        "POLICY",
-        "PROCEDURE",
-        "TABLE",
-        "OF",
-        "FORWARD",
-        "FOREWORD",
-        "STEP",
-        "RESPONSIBILITIES",
-        "APPLICABILITY",
-        "REVISION",
-        "REVISIONS",
-        "APPROVAL",
-    }
-)
-
-
-def is_title_case(text: str) -> bool:
-    """Whether text reads like a title rather than a sentence.
-
-    This is the rule that separates "5.2 Remote Work Policy" (a heading) from
-    "11. If your spouse itemizes deductions, you" (a numbered list item). Titles
-    capitalise their significant words; sentences do not.
-    """
-    words = _WORDS.findall(text)
-    significant = [
-        word for word in words if len(word) >= 3 and word.lower() not in _SMALL_WORDS
-    ]
-    if not significant:
-        return False
-    capitalised = sum(1 for word in significant if word[0].isupper())
-    return capitalised / len(significant) >= 0.6
-
-
-def _numbered_match(line: str) -> re.Match[str] | None:
-    """Return a regex match if the line is a numbered heading, else None."""
-    return _MULTI_LEVEL_HEADING.match(line) or _SINGLE_LEVEL_HEADING.match(line)
-
-
-def looks_like_heading(line: str) -> bool:
-    """Decide whether a single line is a section heading.
-
-    Over-detection is as damaging as under-detection: a document yielding
-    hundreds of "headings" has really yielded none, and every citation built from
-    them is misleading. When in doubt this returns False, and the caller falls
-    back to size-based parents with no section label at all.
-    """
-    stripped = line.strip()
-    if not stripped or len(stripped) > config.MAX_HEADING_CHARS:
-        return False
-    if stripped.endswith(_SENTENCE_END):
-        return False
-    # A trailing hyphen means a word was split across lines: a fragment, not a
-    # heading (e.g. "2. You paid more than half the cost of keep-").
-    if stripped.endswith(("-", "\u2013", "\u2014")):
-        return False
-    # Headings rarely contain a comma; sentences and list items often do.
-    if "," in stripped:
-        return False
-    # Slashes signal print artifacts and form names ("AH XSL/XML").
-    if "/" in stripped:
-        return False
-    # A table-of-contents entry, not the section itself.
-    if _DOT_LEADER.search(stripped):
-        return False
-
-    numbered = _numbered_match(stripped)
-    if numbered:
-        return is_title_case(numbered.group(2))
-
-    keyword = _KEYWORD_HEADING.match(stripped)
-    if keyword:
-        # "SECTION 4" alone is a heading. "Section 3509 rates aren't available
-        # if you..." is a sentence that happens to start with the word.
-        remainder = keyword.group(3).strip(" :-\u2013\u2014")
-        return not remainder or is_title_case(remainder)
-
-    letters = [character for character in stripped if character.isalpha()]
-    if not (len(letters) >= 3 and all(character.isupper() for character in letters)):
-        return False
-    # Reject generic part-labels like "DISCUSSION" that name no topic. Single
-    # letters and Roman numerals are ignored, so "STEP I" is judged on the word
-    # "STEP" alone and correctly rejected.
-    found = [
-        word
-        for word in _WORDS.findall(stripped.upper())
-        if len(word) > 1 and not _ROMAN_NUMERAL.fullmatch(word)
-    ]
-    if not found or set(found).issubset(_GENERIC_LABELS):
-        return False
-    # A short ALL-CAPS fragment is usually a running header or an acronym
-    # ("UTC"), not a section title. Require either several words or one
-    # substantial word.
-    return len(found) >= 2 or len(found[0]) >= 6
-
-
-def heading_depth(line: str) -> int:
-    """How deeply nested a heading is: "5" -> 1, "5.2" -> 2, "5.2.1" -> 3.
-
-    Used to maintain the breadcrumb trail. Non-numbered headings are treated as
-    top level, since there is no reliable depth signal in them.
-    """
-    match = _numbered_match(line.strip())
-    if not match:
-        return 1
-    return len(match.group(1).split("."))
-
-
-def build_breadcrumb(trail: list[tuple[int, str]]) -> str:
-    """Join a heading stack into a citation-ready string.
-
-    [(1, "5. Working Arrangements"), (2, "5.2 Remote Work")] becomes
-    "5. Working Arrangements > 5.2 Remote Work".
-    """
-    return " > ".join(text for _, text in trail)
 
 
 def _explode_long_lines(
@@ -338,11 +132,11 @@ def _prose_parents(blocks: list[Block]) -> list[tuple[str, int, str]]:
                 parents.extend(_emit_parent(current, current_section))
                 current = []
             stripped_line = line.strip()
-            numbered = _numbered_match(stripped_line) is not None
+            numbered = is_numbered_heading(stripped_line) is not None
             # A numbered heading owns its own numbering, so it must not be
             # nested under an unnumbered one: "REFERENCES > 03.05.03 Multi-Factor
             # Authentication" wrongly implies the section lives in References.
-            if numbered and trail and _numbered_match(trail[0][1]) is None:
+            if numbered and trail and is_numbered_heading(trail[0][1]) is None:
                 trail.clear()
             if not numbered:
                 trail.clear()
@@ -423,13 +217,125 @@ def _children_for_ocr(text: str) -> list[str]:
     return children
 
 
+class _ParentIds:
+    """Hands out a unique id per parent within one document.
+
+    A tiny class rather than a passed-around counter, so the three chunk builders
+    below cannot accidentally reuse an id -- which would silently merge two
+    unrelated sections during retrieval's de-duplication step.
+    """
+
+    def __init__(self, filename: str) -> None:
+        self._filename = filename
+        self._issued = 0
+
+    def next(self) -> str:
+        """Return the next parent id for this document."""
+        self._issued += 1
+        return "{}::p{}".format(self._filename, self._issued)
+
+
+def _chunks_from_prose(
+    blocks: list[Block], filename: str, ids: _ParentIds
+) -> list[Chunk]:
+    """Group prose into section parents, then slice each into children.
+
+    Grouped across blocks, not per page, so a section that spans a page break
+    stays one parent.
+    """
+    chunks: list[Chunk] = []
+    for text, page, section in _prose_parents(blocks):
+        parent_id = ids.next()
+        for child in _children_for(text):
+            chunks.append(
+                Chunk(
+                    text=child,
+                    parent_id=parent_id,
+                    parent_text=text,
+                    source=filename,
+                    page=page,
+                    section=section,
+                    content_type=ContentType.PROSE.value,
+                )
+            )
+    return chunks
+
+
+def _chunks_from_ocr(
+    blocks: list[Block], filename: str, ids: _ParentIds
+) -> list[Chunk]:
+    """Slice each OCR'd page into children, keeping the page as the parent.
+
+    Per page rather than grouped, because a scan carries no section headings to
+    group by.
+    """
+    chunks: list[Chunk] = []
+    for block in blocks:
+        parent_id = ids.next()
+        for child in _children_for_ocr(block.text):
+            chunks.append(
+                Chunk(
+                    text=child,
+                    parent_id=parent_id,
+                    parent_text=block.text,
+                    source=filename,
+                    page=block.page,
+                    section="",
+                    content_type=ContentType.OCR.value,
+                )
+            )
+    return chunks
+
+
+def _chunks_from_whole_blocks(
+    blocks: list[Block], filename: str, ids: _ParentIds
+) -> list[Chunk]:
+    """Turn each table or placeholder into exactly one unsliced chunk.
+
+    A table is its own parent and its own only child. Slicing it would separate
+    the rows from their column headers, which is what makes the numbers mean
+    anything.
+    """
+    chunks: list[Chunk] = []
+    for block in blocks:
+        if len(block.text) > config.CHUNK_WARN_CHARS:
+            logger.warning(
+                "Chunk on page %s of %s is %s chars, over the %s-char input "
+                "window of the configured embedding model; the remainder will "
+                "not be searchable",
+                block.page,
+                filename,
+                len(block.text),
+                config.CHUNK_WARN_CHARS,
+            )
+        chunks.append(
+            Chunk(
+                text=block.text,
+                parent_id=ids.next(),
+                parent_text=block.text,
+                source=filename,
+                page=block.page,
+                section="",
+                content_type=block.content_type.value,
+            )
+        )
+    return chunks
+
+
+def _of_type(blocks: list[Block], *kinds: ContentType) -> list[Block]:
+    """Blocks matching any of the given content types, in document order."""
+    return [block for block in blocks if block.content_type in kinds]
+
+
 def chunk_document(blocks: list[Block], filename: str) -> list[Chunk]:
     """Split parsed blocks into child chunks ready for embedding.
 
-    Prose is split into section-based parents, then into small children. Tables
-    are never split: each becomes a single chunk that is its own parent and its
-    own only child. Image-only pages become a visible placeholder chunk rather
-    than being silently dropped.
+    Each content type gets the strategy that suits it, which is the whole point of
+    classifying them in the parser:
+
+    - prose: section parents, sliced into small children
+    - OCR text: one parent per page, sliced on the page's own paragraph breaks
+    - tables and placeholders: one chunk each, never sliced
 
     Args:
         blocks: Parsed blocks from pdf_parser, in document order.
@@ -444,84 +350,19 @@ def chunk_document(blocks: list[Block], filename: str) -> list[Chunk]:
     if not blocks:
         raise ValueError("chunk_document called with no blocks")
 
+    ids = _ParentIds(filename)
     chunks: list[Chunk] = []
-    counter = 0
-
-    # Prose is grouped across blocks so a section can span a page break. OCR text
-    # is per page (a scanned page has no reliable heading structure to follow), and
-    # tables and placeholders are one chunk each.
-    prose_blocks = [
-        block for block in blocks if block.content_type is ContentType.PROSE
-    ]
-    ocr_blocks = [block for block in blocks if block.content_type is ContentType.OCR]
-    other_blocks = [
-        block
-        for block in blocks
-        if block.content_type not in (ContentType.PROSE, ContentType.OCR)
-    ]
-
-    if prose_blocks:
-        for text, page, section in _prose_parents(prose_blocks):
-            counter += 1
-            parent_id = "{}::p{}".format(filename, counter)
-            for child in _children_for(text):
-                chunks.append(
-                    Chunk(
-                        text=child,
-                        parent_id=parent_id,
-                        parent_text=text,
-                        source=filename,
-                        page=page,
-                        section=section,
-                        content_type=ContentType.PROSE.value,
-                    )
-                )
-
-    # OCR text is prose, so it is sliced into children for precise retrieval --
-    # but each page is its own parent, because a scan carries no section headings
-    # to group by.
-    for block in ocr_blocks:
-        counter += 1
-        parent_id = "{}::p{}".format(filename, counter)
-        for child in _children_for_ocr(block.text):
-            chunks.append(
-                Chunk(
-                    text=child,
-                    parent_id=parent_id,
-                    parent_text=block.text,
-                    source=filename,
-                    page=block.page,
-                    section="",
-                    content_type=ContentType.OCR.value,
-                )
-            )
-
-    for block in other_blocks:
-        counter += 1
-        parent_id = "{}::p{}".format(filename, counter)
-        if len(block.text) > config.CHUNK_WARN_CHARS:
-            logger.warning(
-                "Chunk on page %s of %s is %s chars, over the %s-char input "
-                "window of the configured embedding model; the remainder will "
-                "not be searchable",
-                block.page,
-                filename,
-                len(block.text),
-                config.CHUNK_WARN_CHARS,
-            )
-        # A table is its own parent and its own only child -- deliberately not
-        # sliced, because rows are meaningless without their column headers.
-        chunks.append(
-            Chunk(
-                text=block.text,
-                parent_id=parent_id,
-                parent_text=block.text,
-                source=filename,
-                page=block.page,
-                section="",
-                content_type=block.content_type.value,
-            )
+    chunks.extend(
+        _chunks_from_prose(_of_type(blocks, ContentType.PROSE), filename, ids)
+    )
+    chunks.extend(_chunks_from_ocr(_of_type(blocks, ContentType.OCR), filename, ids))
+    chunks.extend(
+        _chunks_from_whole_blocks(
+            _of_type(blocks, ContentType.TABLE, ContentType.IMAGE_ONLY),
+            filename,
+            ids,
         )
+    )
 
     logger.info("%s produced %s child chunks", filename, len(chunks))
     return chunks

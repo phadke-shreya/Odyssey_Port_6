@@ -172,7 +172,7 @@ curl -X POST http://127.0.0.1:8006/ask \
 ## Tests
 
 ```bash
-pytest -q                            # 150 tests
+pytest -q                            # 151 tests
 black --check app tests eval tools   # formatting
 ruff check app tests eval tools      # linting
 python tools/check_conventions.py    # the conventions in CLAUDE.md
@@ -239,13 +239,14 @@ app/
   config.py        every tunable setting, in one place
   pdf_parser.py    read -> clean -> classify (prose / table / OCR / unreadable)
   ocr.py           read text out of pages that have no text layer
-  chunker.py       section detection -> parents -> children
+  headings.py      is this line a section heading, and how deep
+  chunker.py       parents -> children, one strategy per content type
   vector_store.py  embed, persist to ChromaDB, retrieve, expand to parents
   rag_chain.py     prompt -> model -> answer + citations
   main.py          FastAPI endpoints
 streamlit_app.py   the UI (display only; calls the API over HTTP)
 ingest.py          load every PDF in documents/
-tests/             150 tests, including architecture boundaries
+tests/             151 tests, including architecture boundaries
 eval/              questions.json + run_eval.py (retrieval metrics)
 .github/workflows/ CI: lint, build the index, test, measure retrieval
 documents/         your PDFs

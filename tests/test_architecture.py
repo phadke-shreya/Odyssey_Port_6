@@ -77,6 +77,16 @@ def test_chunker_does_not_read_pdfs() -> None:
     assert _imports_cleanly_without("chunker", "pdfplumber")
 
 
+def test_heading_detection_stands_alone() -> None:
+    """headings.py answers "is this line a heading" and nothing else.
+
+    It was split out of the chunker precisely so it could be tested on bare
+    strings. If it ever imports the chunker or the models, that property is gone
+    and the split bought nothing.
+    """
+    assert _app_imports("headings") <= {"config"}
+
+
 def test_the_parser_does_not_depend_on_the_chunker() -> None:
     """Regression: the producer imported its own consumer for a data type."""
     assert "chunker" not in _app_imports("pdf_parser")

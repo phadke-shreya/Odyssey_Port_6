@@ -333,6 +333,7 @@ Abstract SOLID is useless. Here it is in terms of this repo.
 | `models.py` | hold the data types passed between modules | import anything from `app` |
 | `config.py` | hold every tunable setting | import anything from `app` |
 | `pdf_parser.py` | read + clean + classify | chunk, embed |
+| `headings.py` | decide if one line is a heading, and how deep | know about chunks or blocks |
 | `chunker.py` | text → parent/child chunks | touch PDFs or Chroma |
 | `vector_store.py` | embed, store, retrieve, expand to parents | build prompts or call the LLM |
 | `rag_chain.py` | prompt → LLM → answer + citations | know Chroma exists |

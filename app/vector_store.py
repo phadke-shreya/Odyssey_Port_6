@@ -306,15 +306,8 @@ def _to_retrieved(metadata: dict, distance: float, match_type: str) -> Retrieved
     )
 
 
-def search(question: str) -> list[Retrieved]:
-    """Find the parent sections most likely to answer a question.
-
-    Searches small children for precision, then expands each match to its parent
-    section for context, de-duplicating so one section is never sent twice.
-
-    Returns:
-        Up to TOP_K_PARENTS unique parents, nearest first. An empty list means
-        nothing was close enough, and the honest answer is "I don't know".
+def _validated(question: str) -> str:
+    """Return the question stripped, or raise if it cannot be searched.
 
     Raises:
         ValueError: If the question is empty or absurdly long.
@@ -328,33 +321,45 @@ def search(question: str) -> list[Retrieved]:
                 len(cleaned), config.MAX_QUERY_CHARS
             )
         )
+    return cleaned
 
-    collection = get_collection()
-    if collection.count() == 0:
-        logger.warning("Search attempted on an empty collection")
-        return []
 
+def _literal_pass(
+    collection: Collection, question: str, best: dict[str, Retrieved]
+) -> None:
+    """Add exact identifier matches to `best`, in place.
+
+    An exact hit on "03.05.03" is not a guess, so it is deliberately not subject
+    to the distance threshold, and it is recorded at distance 0.0 so it outranks
+    anything semantic.
+    """
+    terms = identifier_terms(question)
+    if not terms:
+        return
+    for metadata in _keyword_candidates(collection, terms):
+        parent_id = str(metadata.get("parent_id", ""))
+        if parent_id not in best:
+            best[parent_id] = _to_retrieved(metadata, 0.0, "exact")
+
+
+def _semantic_pass(
+    collection: Collection, question: str, best: dict[str, Retrieved]
+) -> int:
+    """Add nearest-neighbour matches to `best`, in place, gated by distance.
+
+    Only the nearest hit per parent is kept, so one section is never sent to the
+    model twice, and an exact match already in `best` is never overwritten.
+
+    Returns:
+        How many children the vector search examined, for logging.
+    """
     found = collection.query(
-        query_texts=[cleaned],
+        query_texts=[question],
         n_results=min(config.TOP_K_CHILDREN, collection.count()),
     )
     metadatas = (found.get("metadatas") or [[]])[0]
     distances = (found.get("distances") or [[]])[0]
 
-    # Keep the best (nearest) hit per parent, so one section appears once.
-    best: dict[str, Retrieved] = {}
-
-    # Pass 1: literal identifier matches. An exact hit on "03.05.03" is not a
-    # guess, so it is not subject to the distance threshold and it outranks
-    # anything semantic.
-    terms = identifier_terms(cleaned)
-    if terms:
-        for metadata in _keyword_candidates(collection, terms):
-            parent_id = str(metadata.get("parent_id", ""))
-            if parent_id not in best:
-                best[parent_id] = _to_retrieved(metadata, 0.0, "exact")
-
-    # Pass 2: semantic matches, gated by distance.
     for metadata, distance in zip(metadatas, distances, strict=False):
         if distance > config.MAX_DISTANCE:
             continue
@@ -366,25 +371,76 @@ def search(question: str) -> list[Retrieved]:
             continue
         best[parent_id] = _to_retrieved(metadata, float(distance), "semantic")
 
-    # Exact matches first, then semantic by distance.
+    return len(metadatas)
+
+
+def _names_something_absent(question: str, results: list[Retrieved]) -> bool:
+    """True when the question names an entity no retrieved section mentions.
+
+    The second anti-hallucination guard. A close distance is not an answer if the
+    thing being asked about never appears in what came back: "What is the ISO 27001
+    audit cycle?" retrieves plausible-looking compliance prose from a corpus that
+    has never heard of ISO 27001.
+
+    An exact identifier match exempts the whole result set -- that is already
+    proof the right chunk was found.
+    """
+    entities = named_entities(question)
+    if not entities or not results:
+        return False
+    if any(result.match_type == "exact" for result in results):
+        return False
+    if _mentions_all(entities, results):
+        return False
+    logger.info(
+        "Refusing: question names %s, which no retrieved section mentions",
+        entities,
+    )
+    return True
+
+
+def search(question: str) -> list[Retrieved]:
+    """Find the parent sections most likely to answer a question.
+
+    Two passes, deliberately in this order:
+
+    1. literal -- exact matches on identifiers such as "03.05.03", which vector
+       similarity handles badly because one digit barely moves an embedding
+    2. semantic -- nearest neighbours among the small children, gated by distance
+
+    Each match is then expanded to its parent section for context, de-duplicated
+    so one section is never sent twice, and checked against the entity guard.
+
+    Returns:
+        Up to TOP_K_PARENTS unique parents, exact matches first then nearest.
+        An empty list means nothing was close enough, and the honest answer is
+        "I don't know".
+
+    Raises:
+        ValueError: If the question is empty or absurdly long.
+    """
+    cleaned = _validated(question)
+
+    collection = get_collection()
+    if collection.count() == 0:
+        logger.warning("Search attempted on an empty collection")
+        return []
+
+    # Keyed by parent id, so one section appears once no matter how many of its
+    # children matched.
+    best: dict[str, Retrieved] = {}
+    _literal_pass(collection, cleaned, best)
+    examined = _semantic_pass(collection, cleaned, best)
+
     ranked = sorted(
         best.values(), key=lambda r: (0 if r.match_type == "exact" else 1, r.distance)
     )
-
-    # Second guard: if the question names an entity the corpus never mentions,
-    # a close distance is not an answer. An exact identifier match is exempt --
-    # that is already proof the right chunk was found.
-    entities = named_entities(cleaned)
-    has_exact = any(result.match_type == "exact" for result in ranked)
-    if entities and ranked and not has_exact and not _mentions_all(entities, ranked):
-        logger.info(
-            "Refusing: question names %s, which no retrieved section mentions",
-            entities,
-        )
+    if _names_something_absent(cleaned, ranked):
         return []
+
     logger.info(
         "%s semantic + %s literal -> %s unique parents (kept %s)",
-        len(metadatas),
+        examined,
         sum(1 for result in best.values() if result.match_type == "exact"),
         len(best),
         min(len(ranked), config.TOP_K_PARENTS),
