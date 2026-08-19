@@ -314,6 +314,12 @@ These are graded deliverables. **No refactor, simplification, or time pressure m
 
 5. **A table is never split.** One table = one chunk = its own parent and child. There is a test. Keep it passing.
 
+6. **Retrieval changes must be measured, not asserted.** Anything touching chunk
+   sizes, the embedding model, `MAX_DISTANCE`, or the search strategy requires
+   `python eval/run_eval.py` before and after, and the numbers stated. "It seems
+   better" is not acceptable evidence — the threshold sweep exists precisely
+   because eyeballing it produced the wrong value twice.
+
 Also: **`temperature=0`** on every generation call, so the same question gives the same answer (M6B1).
 
 ## 12. SOLID, concretely

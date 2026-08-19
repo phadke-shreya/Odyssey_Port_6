@@ -112,6 +112,46 @@ must never be the thing that breaks on an unfamiliar document.
 
 ---
 
+## 4b. Two searches, not one
+
+Embeddings understand **meaning**, and that is exactly why they are bad at
+**codes**. `Table 2-2` and `03.05.03` mean almost nothing as text, so their
+"address on the map of meaning" is close to noise. Ask *"what does Table 2-2
+show?"* and pure vector search returns nothing useful.
+
+So the app runs **two** searches and merges them:
+
+| Pass | Finds | Good at |
+|---|---|---|
+| **Vector** | things that *mean* the same | synonyms, paraphrases, concepts |
+| **Exact identifier** | things that *literally contain* `Table 2-2` | codes, policy numbers, part numbers, pin names |
+
+Measured on this corpus, identifier questions went from **62% correct to 100%**.
+
+**The safety catch.** A literal search must not become a back door. If any number
+counted as an identifier, then *"Who won the World Cup in 2022?"* would look up
+`2022`, find it somewhere, and answer an out-of-scope question. So an identifier
+must be **structured** — it must contain `.`, `-`, `#`, or mix letters with digits.
+`03.05.03` qualifies; a bare `2022` does not.
+
+## 4c. Two guards on "I don't know"
+
+**Guard 1 — distance.** If nothing is close enough, refuse. Measured, not guessed:
+the sweep showed in-scope recall stays at 100% up to 0.40, and out-of-scope
+refusal stays at 100% down to 0.35, so the threshold sits at 0.375, in the middle.
+
+**Guard 2 — named entities.** Distance alone cannot tell *"topically close"* from
+*"actually answers"*. Asking about **GDPR** scored 0.36 against a document about
+US compliance that never mentions GDPR — close enough to pass, but not an answer.
+So: if a question names an acronym (GDPR, HIPAA) that appears **nowhere** in what
+was retrieved, refuse.
+
+Deliberately narrow — only acronyms. Requiring ordinary words to match would
+break the entire point of embeddings, which is finding *"annual leave"* when
+someone asks about *"vacation days"*.
+
+---
+
 ## 5. Why each piece of the tech stack
 
 | Tool | Job | Why this one |
@@ -122,7 +162,8 @@ must never be the thing that breaks on an unfamiliar document.
 | **OpenAI-compatible API** | Embeddings + answers | A standard shape that OpenAI, company gateways, and local servers (Ollama) all speak — so one code path serves all three. |
 | **FastAPI** | The brain, as HTTP | Separating logic from screen means a Slack bot or mobile app could use the same `/ask` endpoint. Also gives free interactive docs at `/docs`. |
 | **Streamlit** | The screen | Chat-style interface in very little code, which is the right shape for document Q&A. |
-| **pytest** | Prove it works | 96 tests. Most exist because a real bug happened and must not come back. |
+| **pytest** | Prove it works | 126 tests. Most exist because a real bug happened and must not come back. |
+| **eval harness** | Prove *retrieval* works | 31 ground-truth questions plus out-of-scope and near-miss sets. Turns "retrieval seems good" into a number that can be compared before and after a change. |
 | **black + ruff** | Format and lint | Consistent style with no arguing about it. |
 
 ### Why FastAPI *and* Streamlit, rather than only Streamlit?
@@ -178,18 +219,28 @@ model built it and refuses to answer on a mismatch.
 
 ## 7. Where this system is weakest
 
-Knowing this is part of understanding it.
+Knowing this is part of understanding it. These are the gaps that remain **after**
+hybrid retrieval, the second guard, and the eval harness.
 
 | Weakness | Why | What we do |
 |---|---|---|
 | **Scanned pages** | Embeddings cannot read pictures | Detected and flagged; OCR not implemented |
 | **Counting questions** | "How many X in total?" needs every chunk; we fetch 8 | Inherent to RAG. Say so honestly. |
-| **Comparison across documents** | The two halves may not both be retrieved | Same limitation |
-| **The "I don't know" threshold** | It is a number tuned by measurement, and **it changes when the embedding model changes** | Threshold lives beside the model in config, with the measured values written down |
-| **Small model, sloppy inline citations** | `llama3.2` is 3B parameters | The Sources list is built by **code**, so it is always right; only the inline pointer can be wrong |
+| **Single turn only** | No conversation memory | A follow-up like "and for managers?" is treated as a fresh question |
+| **The entity guard only knows acronyms** | "the European privacy regulation" names GDPR without saying GDPR | That near-miss falls back to the distance threshold alone |
+| **The threshold is corpus-specific** | It was measured on these five documents | Re-measure on a very different corpus: `python eval/run_eval.py --sweep` |
+| **Small model, sloppy inline citations** | `llama3.2` is 3B parameters | The Sources list is built by **code**, so it is always right; only the model's inline pointer can be wrong |
 | **Sparsely numbered documents** | Few headings means huge sections labelled `(part 3 of 16)` | Accurate but coarse; better on densely numbered documents |
 
----
+### What used to be on this list, and is not any more
+
+- ~~No way to measure retrieval quality~~ → `eval/run_eval.py`, 31 ground-truth
+  questions, run in CI on every push
+- ~~Exact identifiers retrieve badly~~ → the literal-match pass took identifier
+  questions from 62% to 100%
+- ~~Topical near-misses slip through~~ → the named-entity guard catches them
+- ~~The threshold was tuned by eye~~ → chosen from a measured sweep, and the
+  numbers are recorded in `config.py`
 
 ## 8. Who would use this, and what it saves
 

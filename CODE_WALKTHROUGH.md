@@ -10,6 +10,10 @@ config.py  ->  chunker.py  ->  pdf_parser.py  ->  vector_store.py
            ->  rag_chain.py  ->  main.py  ->  streamlit_app.py
 ```
 
+`eval/run_eval.py` sits outside that chain: it imports the app and measures
+retrieval quality against `eval/questions.json`. Run it after any change that
+could affect retrieval.
+
 **Two conventions used everywhere** (from CLAUDE.md), because a reviewer will ask:
 
 1. **No f-strings** — `"{}".format(x)` throughout, for consistency.
@@ -135,27 +139,74 @@ Getting clean, correctly-classified text out is most of the work.
 
 ---
 
-# `app/vector_store.py` — the database
+# `app/vector_store.py` — the database and retrieval
 
 **Why this file exists:** it is the only file that imports `chromadb`. Swapping
-Chroma for something else touches this file and nothing else.
+Chroma for something else touches this file and nothing else. It also holds the
+two-pass retrieval and both anti-hallucination guards.
+
+### Storage (lines 32–178)
 
 | Lines | What it does |
 |---|---|
-| `29-31` | `_SPACE = "cosine"`. Chroma's default is squared L2 distance. **Cosine is set explicitly** because it is bounded and comparable across documents, which is what makes one `MAX_DISTANCE` threshold meaningful. |
-| `35` | `_BATCH = 500` — chunks are sent in batches so memory stays flat and progress is visible instead of the app appearing to hang. |
-| `37` | The metadata key holding the fingerprint. |
-| `40-41` | **`EmbeddingModelMismatch`** — our own exception type, so callers can catch exactly this. |
-| `44-60` | **`Retrieved`** — one parent section ready to cite. `55-60` `citation()` builds the display string: always file and page, plus the section **only if there is one** (line `58`) — an empty label would render as an ugly trailing `\|`. |
-| `63-77` | **`_embedding_function()`** — picks the embedder from config. `71-75` the OpenAI path passes `api_base=config.OPENAI_BASE_URL`; **that single argument is why a company gateway or Ollama works without a code change.** `77` otherwise ChromaDB's built-in local model. |
-| `80-83` | **`_client()`** — `mkdir(parents=True, exist_ok=True)` creates the folder if needed and does not complain if it exists. `PersistentClient` is the on-disk client; the in-memory one would lose everything on restart. |
-| `86-126` | **`get_collection()`** — opens or creates the collection. `98-102` `get_or_create` avoids a separate "does it exist" call; the metadata carries both the distance space and our fingerprint. `103-115` Chroma runs its **own** conflict check that fires before ours with an unhelpful message, so it is caught and re-raised as *"Run: python ingest.py --reset"*. `115` `raise` bare re-raises anything unrelated. `117-125` our own check: if the stored fingerprint differs from the current one, refuse. `check_fingerprint=False` exists so `/health` can report on a mismatched database instead of crashing. |
-| `129-133` | **`reset()`** — deletes the folder. Required after changing embedding model. |
-| `136-178` | **`ingest()`** — `146-147` refuse empty input. `155-167` build three parallel lists, which is the shape Chroma wants: `156` a unique id per child (`parent_id` plus the loop index); `157` **`documents` is the child text — this is what gets embedded**; `158-167` the metadata, including `parent_text`, which is what makes expansion possible later. `169-176` add in batches of 500, logging progress. |
-| `181-242` | **`search()`** — the heart of retrieval. `194-202` validate the question: empty and over-long both raise `ValueError` with a readable sentence. `205-207` an empty database returns `[]` rather than erroring. `209-212` query for `TOP_K_CHILDREN` children; `min(..., collection.count())` avoids asking for more than exist. `214-215` unwrap Chroma's nested lists (it supports batched queries, so results come back one list per query). `218-233` **the de-duplication**: for each hit, `220-221` drop anything beyond `MAX_DISTANCE` — *this line is the anti-hallucination guard*; `222-225` keep only the **nearest** child per `parent_id`, so one section never appears twice; `226-233` build the `Retrieved` object from metadata. `235` sort nearest-first. `242` return at most `TOP_K_PARENTS`. |
-| `245-266` | **`stats()`** — for `/health` and the sidebar. `247-251` wrapped in a broad `except` because **a health check must never crash**; it returns zeros instead. `256-260` sample up to 5000 chunks to collect the distinct document names. |
+| `32` | `_SPACE = "cosine"`. Chroma's default is squared L2. **Cosine is set explicitly** because it is bounded and comparable across documents, which is what makes one distance threshold meaningful. |
+| `36` | `_BATCH = 500` — chunks are sent in batches so memory stays flat and progress is visible. |
+| `41-42` | **`EmbeddingModelMismatch`** — our own exception type, so callers can catch exactly this. |
+| `46-62` | **`Retrieved`** — one parent section ready to cite. `match_type` records *why* it was found: `"semantic"` or `"exact"`. `citation()` includes the section **only if there is one**, since an empty label would render as a trailing `\|`. |
+| `65-79` | **`_embedding_function()`** — picks the embedder from config. The OpenAI path passes `api_base=config.OPENAI_BASE_URL`; **that single argument is why a company gateway or Ollama works with no code change.** |
+| `82-85` | **`_client()`** — `PersistentClient` writes to disk; the in-memory client would lose everything on restart. |
+| `88-128` | **`get_collection()`** — opens or creates it. Chroma runs its **own** conflict check that fires before ours with an unhelpful message, so it is caught and re-raised as *"Run: python ingest.py --reset"*. Our own fingerprint check follows. `check_fingerprint=False` lets `/health` report on a mismatched database instead of crashing. |
+| `131-135` | **`reset()`** — deletes the folder. Required after changing embedding model. |
+| `138-180` | **`ingest()`** — builds three parallel lists, the shape Chroma wants. **`documents` is the child text: that is what gets embedded.** The metadata carries `parent_text`, which is what makes expansion possible later. Added in batches of 500. |
 
----
+### Pass 1 — exact identifiers (lines 184–293)
+
+Pure vector search is weak here: an embedding of `Table 2-2` carries almost no
+meaning. Measured on the eval set, identifier questions scored **62% Hit@1 and
+25% grounded** before this existed, and 100% on both after.
+
+| Lines | What it does |
+|---|---|
+| `188-204` | `_LABEL_WORDS` — words that commonly precede an identifier (`table`, `policy`, `control`), so `Table 2-2` is searched as a **phrase** before the bare token `2-2`. |
+| `206` | `_TOKEN` — note the leading `#` is allowed, so `Policy #14` yields the token `#14`. Without it the regex skipped the `#`, left `14`, and rejected it as too short. |
+| `212` | **`_STRUCTURED`** — the safety rule. An identifier must contain `.`, `#`, `/` or `-`, **or** mix letters with digits. A bare number is deliberately excluded: otherwise the year in *"Who won the World Cup in 2022?"* would trigger a literal lookup and could defeat the refusal. |
+| `216` | `_KEYWORD_LIMIT = 5` — a term appearing in hundreds of chunks is a common word, not an identifier. |
+| `219-249` | **`identifier_terms()`** — walks the question's words, keeps tokens with a digit that pass the structure rule, and prefixes a label word when one precedes it. Returns most-specific first. |
+| `252-291` | **`_keyword_candidates()`** — literal lookup via Chroma's `where_document={"$contains": ...}`. It is **case-sensitive**, so a couple of casings are tried and the loop stops at the first that hits. Every failure is swallowed and logged: a literal pass is an enhancement and must never be the reason a search breaks. |
+
+### Pass 2 guard — named entities (lines 296–312)
+
+| Lines | What it does |
+|---|---|
+| `296` | `_ACRONYM` — matches an ALL-CAPS 3–8 letter token. |
+| `299` | `_COMMON_ACRONYMS` — words too common to be evidence of anything. |
+| `302-306` | **`named_entities()`** — acronyms the question names. |
+| `309-312` | **`_mentions_all()`** — whether every named entity appears somewhere in the retrieved text. |
+
+**Why only acronyms.** Distance cannot distinguish *"topically close"* from
+*"actually answers"*: a question about **GDPR** scored 0.36 against a document on
+US compliance that never mentions GDPR. But requiring *ordinary* words to overlap
+would destroy the point of embeddings — *"vacation days"* must still find
+*"annual leave"*. Named entities are the narrow case where absence really is
+evidence.
+
+### `search()` (lines 328–411)
+
+| Lines | What it does |
+|---|---|
+| `~336-345` | Validate: empty and over-long questions raise `ValueError` with a readable sentence. |
+| `~349-351` | An empty database returns `[]` rather than erroring. |
+| `~353-358` | The vector query, for `TOP_K_CHILDREN` children. `min(..., count())` avoids asking for more than exist. |
+| `~366-372` | **Pass 1** — literal matches first. An exact hit on `03.05.03` is not a guess, so it is **exempt from the distance threshold** and gets `match_type="exact"`. |
+| `~375-384` | **Pass 2** — semantic matches, gated by distance. An existing exact match for the same parent is never overwritten. |
+| `~387-389` | Rank exact matches first, then semantic by distance. |
+| `~395-404` | **Guard 2** — if the question names an entity nothing retrieved mentions, return `[]`. Exempt when an exact identifier matched, since that is already proof the right chunk was found. |
+| `~411` | Return at most `TOP_K_PARENTS`. |
+
+### `stats()` (lines 414–435)
+
+Wrapped in a broad `except` because **a health check must never crash**; it
+returns zeros instead. Samples up to 5000 chunks to collect the document names.
 
 # `app/rag_chain.py` — the prompt and the model
 

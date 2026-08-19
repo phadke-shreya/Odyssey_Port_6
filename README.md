@@ -16,7 +16,8 @@ Built with FastAPI, LangChain, ChromaDB and Streamlit.
 | **Section-aware boundaries** | Parents come from the document's own headings (`5.2 Remote Work Policy`), so citations name a section, not just a page. Falls back safely on documents with no numbering. |
 | **Tables are never split** | A table is one chunk, always, because rows are meaningless without their column headers. It also gets a caption so it is findable. |
 | **Scanned pages are flagged, not dropped** | A page with no extractable text becomes a visible placeholder. A known gap beats a silent one. |
-| **"I don't know" is structural** | Decided by retrieval distance *before* the model is called, so an out-of-scope question never reaches the LLM. |
+| **Hybrid retrieval** | Vector search finds meaning; an exact-identifier pass finds `Table 2-2`, `Policy #37`, `03.05.03`. Embeddings are poor at codes -- this took identifier questions from 62% to 100%. |
+| **"I don't know" is structural** | Two guards, both *before* the model is called: a distance threshold, and a check that any entity the question names (GDPR, HIPAA) is actually mentioned in what was retrieved. |
 | **Answers cannot lose their sources** | Text and citations travel in one object; no code path returns text alone. |
 
 ## Documentation
@@ -138,7 +139,7 @@ curl -X POST http://127.0.0.1:8006/ask \
 ## Tests
 
 ```bash
-pytest -q                 # 85 tests
+pytest -q                 # 126 tests
 black --check app tests   # formatting
 ruff check app tests      # linting
 ```
@@ -149,6 +150,34 @@ defects found in actual PDFs: page footers read as headings, sibling sections
 wrongly nested, table rows separated from their column headers.
 
 ---
+
+## Measuring retrieval quality
+
+Retrieval quality is a number here, not an impression:
+
+```bash
+python eval/run_eval.py            # measure
+python eval/run_eval.py --sweep    # also sweep the distance threshold
+```
+
+`eval/questions.json` holds 31 questions with ground truth, 10 out-of-scope
+questions, and 4 deliberate near-misses. The harness **validates its own ground
+truth first** -- if an expected phrase is not in the expected document, that is a
+bug in the question set and it says so rather than scoring the app down.
+
+Current numbers:
+
+| Group | Metric | Score |
+|---|---|---|
+| In-scope (23) | Hit@1 / Recall@4 / MRR / Grounded | 100% / 100% / 1.00 / 100% |
+| Hard identifiers (8) | Hit@1 / Grounded | 100% / 100% |
+| Out-of-scope (10) | Refused | 100% |
+| Near-miss (4) | Refused | 100% |
+
+Run it after **any** change that could affect retrieval -- chunk sizes, embedding
+model, threshold, search strategy. `--sweep` is how the threshold was chosen:
+it prints in-scope recall against out-of-scope refusal across a range, and the
+value in `config.py` sits in the middle of the window where both are 100%.
 
 ## Project layout
 
@@ -162,7 +191,9 @@ app/
   main.py          FastAPI endpoints
 streamlit_app.py   the UI (display only; calls the API over HTTP)
 ingest.py          load every PDF in documents/
-tests/             85 tests
+tests/             126 tests
+eval/              questions.json + run_eval.py (retrieval metrics)
+.github/workflows/ CI: lint, build the index, test, measure retrieval
 documents/         your PDFs
 chroma_db/         the vector database (created by ingest; gitignored)
 ```
@@ -190,9 +221,15 @@ Put PDFs in `documents/` and run `python ingest.py`.
 You are probably on Python 3.14. Rebuild the venv with 3.11 or 3.12.
 
 **Answers are poor, or cite the wrong thing**
-Suspect retrieval before the model. Check which sources came back in the UI: if
-the right section is not among them, no model can fix the answer. Try
-`EMBEDDING_PROVIDER=openai` (then `--reset`), which retrieves noticeably better.
+Suspect retrieval before the model -- if the right section never came back, no
+model can rescue the answer. Measure it rather than guessing:
+`python eval/run_eval.py`. If in-scope recall is high but answers still read
+badly, the model is the problem, not retrieval; try a larger `CHAT_MODEL`.
+
+**A question that should be refused gets answered anyway**
+Run `python eval/run_eval.py --sweep` and pick a threshold inside the window
+where in-scope recall and out-of-scope refusal are both high. Note the two are in
+tension: a lower threshold refuses more but starts dropping real answers.
 
 ---
 
@@ -202,12 +239,20 @@ Stated plainly, because knowing where a system is weak is part of using it.
 
 - **Scanned pages are not readable.** They are detected and flagged, not
   transcribed. OCR would fix this and is not implemented.
-- **Sparsely numbered documents get coarse sections.** With few headings,
-  sections are large and get labelled `(part 3 of 16)`. Accurate, but less
-  useful than on a densely numbered policy document.
-- **Counting and comparison questions are weak.** "How many X in total?" needs
+- **Counting and totalling questions are weak.** "How many X in total?" needs
   every chunk; retrieval fetches a handful. This is inherent to RAG.
-- **The local embedding model truncates long chunks** at roughly 1000
-  characters, which silently affects large tables. `EMBEDDING_PROVIDER=openai`
-  has a 32,000-character window and does not have this problem — ingest logs a
-  warning for every chunk at risk.
+- **Single turn only.** There is no conversation memory, so a follow-up like
+  "and for managers?" is treated as a fresh question.
+- **The named-entity guard only understands acronyms.** A near-miss phrased
+  without one -- "what does the European privacy regulation require?" -- is not
+  caught by it and relies on the distance threshold alone.
+- **The distance threshold is corpus-specific.** It was measured on these five
+  documents. A very different corpus should be re-measured with
+  `python eval/run_eval.py --sweep`.
+- **Answer wording depends on the model.** With a small local model such as
+  `llama3.2`, the inline `(Source N)` pointer is occasionally missing or wrong.
+  The Sources list is built by code and is always correct; only the model's
+  inline reference can be off. A larger model fixes it (`CHAT_MODEL=qwen2.5:7b`).
+- **Sparsely numbered documents get coarse sections.** With few headings,
+  sections are large and get labelled `(part 3 of 16)`: accurate, but less
+  useful than on a densely numbered document.

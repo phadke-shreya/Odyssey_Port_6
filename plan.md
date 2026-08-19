@@ -712,3 +712,44 @@ Not done until **all** of these are true:
 - [ ] Works on a brand-new PDF I've never tested
 - [ ] ~10 real commits across the day, not one `final` dump
 - [ ] I can answer every question in section 10 without notes
+
+---
+
+## 13. What actually got built (written after the fact)
+
+The plan above was written before any code existed. This section records where
+reality differed, because that is the interesting part.
+
+### Changed from the plan
+
+| Plan said | What happened | Why |
+|---|---|---|
+| Embeddings via OpenAI `text-embedding-3-small` | **`nomic-embed-text` via Ollama** | The available API key was a gateway key with no base URL, so both models moved local. Same 8k-token window, no cost, no key. |
+| Answers via Claude | **`llama3.2` via Ollama** | Same reason. The brief did not mandate a provider. |
+| Vector search only | **Vector + exact-identifier search** | Measured: identifier questions like "what does Table 2-2 show?" scored 62% Hit@1 with vectors alone, 100% with a literal-match pass. |
+| One `MAX_DISTANCE` constant | **Model-dependent, chosen from a sweep** | The number is a property of the embedding model. Switching models broke 8 tests because every distance shifted. |
+| "I don't know" from distance alone | **Distance + a named-entity check** | Distance cannot tell "topically close" from "answers the question". A GDPR question scored 0.36 against a document that never mentions GDPR. |
+| No evaluation planned | **`eval/run_eval.py`, 31 ground-truth questions** | Without it, every tuning decision was guesswork. This should have been built first. |
+| IRS tax publications as test documents | **HR policy, lab safety SOP, product manual, compliance standard** | The first set worked technically but told the wrong story: the brief is about a company document library. |
+
+### The bugs worth remembering
+
+1. **Heading detection found 120 headings in two documents, and essentially all
+   were wrong** — page footers, numbered list items, wrapped fragments. Fixed with
+   a Title-Case test. This took the most iterations of anything in the project.
+2. **Citations pointed at page 1 for text on page 30**, because a parent inherited
+   its heading's page rather than tracking pages per line.
+3. **Sibling sections nested under one another** (`3.1 Access Control > 3.5
+   Identification`) because the breadcrumb truncated by list position instead of
+   heading depth.
+4. **The model cited `[50]`** — a reference marker copied out of the NIST text,
+   because our citations used the same `[n]` format the documents use.
+5. **A line-based parent splitter could not split a single 8800-character
+   paragraph.** Caught by an existing test the moment the change was made.
+
+### What I would still do differently
+
+- **Build the eval set first.** Everything before it was tuned by eye, and two
+  decisions (chunk size, threshold) had to be revisited once numbers existed.
+- **Choose the documents for the demo story first.** Rebuilding the index around
+  the right corpus late meant re-running everything.
