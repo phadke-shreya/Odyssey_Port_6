@@ -71,9 +71,9 @@ def _embedding_function():
     if config.EMBEDDING_PROVIDER == "openai":
         logger.info("Embedding via OpenAI model %s", config.EMBEDDING_MODEL)
         return embedding_functions.OpenAIEmbeddingFunction(
-            api_key=config.OPENAI_API_KEY,
+            api_key=config.EMBEDDING_API_KEY,
             model_name=config.EMBEDDING_MODEL,
-            api_base=config.OPENAI_BASE_URL,
+            api_base=config.EMBEDDING_BASE_URL,
         )
     logger.info("Embedding locally with %s", config.LOCAL_EMBEDDING_MODEL)
     return embedding_functions.DefaultEmbeddingFunction()

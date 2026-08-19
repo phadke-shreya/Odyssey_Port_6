@@ -59,7 +59,8 @@ def health() -> dict[str, object]:
         "chunks": summary["chunks"],
         "documents": summary["sources"],
         "embedding_model": summary["fingerprint"],
-        "api_key_configured": bool(config.OPENAI_API_KEY),
+        "embedding_key_configured": bool(config.EMBEDDING_API_KEY),
+        "chat_key_configured": bool(config.CHAT_API_KEY),
         "config_problem": config.missing_credentials(),
     }
 

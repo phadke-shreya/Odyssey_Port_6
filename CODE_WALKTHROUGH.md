@@ -30,30 +30,27 @@ find. One home means it cannot drift.
 | Lines | What it does |
 |---|---|
 | `1-5` | Module docstring. States the rule: nothing else in the project reads `os.environ` or hardcodes a number. |
-| `7-10` | `os` for environment variables, `Path` for filesystem paths, `load_dotenv` to read `.env`. |
-| `12` | `load_dotenv()` — reads `.env` into the environment. **Runs at import**, so every later `os.getenv` sees it. |
-| `15` | `PROJECT_ROOT` — `__file__` is `app/config.py`; `.resolve()` makes it absolute; `.parent.parent` climbs from `config.py` → `app/` → project root. Absolute paths mean the app works no matter which directory you run it from. |
-| `16-17` | `documents/` (input PDFs) and `chroma_db/` (the database) built from the root with `/`, which `pathlib` overloads to mean "join path". |
-| `18` | `CHROMA_COLLECTION` — the table name inside the database. |
-| `21` | `OPENAI_API_KEY` — `os.getenv(name, "")` returns `""` rather than `None` if unset, so later code can do a simple truth test. |
-| `25` | `OPENAI_BASE_URL` — `.strip()` removes stray spaces; `or None` converts empty string to `None`, because the SDK treats `None` as "use the default host" but would treat `""` as a real (broken) URL. **This one line is what lets a company gateway or Ollama work with no code change.** |
-| `34-35` | The two model names, both `os.getenv`-overridable so a gateway or local server can expose different names. |
-| `40` | `EMBEDDING_PROVIDER` — `"local"` or `"openai"`. `.strip().lower()` so `" OpenAI "` still works. |
-| `45` | `LOCAL_EMBEDDING_MODEL` — the fallback that needs no key. Not overridable: it is whatever ChromaDB ships. |
-| `48` | `CHAT_TEMPERATURE = 0` — temperature controls randomness; 0 means "always pick the most likely next word", so the same question gives the same answer. **This is what makes the app consistent (graded: M6B1).** |
-| `53-55` | The chunk sizes. Parents 3000 chars (what the AI reads), children 400 with 80 overlap (what gets searched). |
-| `59` | `MIN_HEADINGS_FOR_SECTIONS = 3` — below this, a document is treated as unstructured and we fall back to size-based parents. |
-| `62` | `MAX_HEADING_CHARS = 80` — a heading is short. Longer means it is prose that merely looks like one. |
-| `65` | `MIN_CHARS_FOR_TEXT_PAGE = 100` — a full page with less text than this is almost certainly a scan. |
-| `71-75` | `CHUNK_WARN_CHARS` — how long a chunk may be before the embedding model would silently cut it off. **It is a conditional expression**, not a constant, because the limit is a property of the model in use: 1000 for MiniLM, 30000 for the hosted ones. |
-| `78` | `TOP_K_CHILDREN = 8` — how many small pieces to fetch. |
-| `79` | `TOP_K_PARENTS = 4` — how many unique sections survive de-duplication and reach the AI. Fetching 8 to keep 4 leaves room for several children sharing one parent. |
-| `81-98` | `MAX_DISTANCE` — the anti-hallucination threshold, also model-dependent. **The comment records the measured numbers for both models and tells the next person how to re-measure.** This is the single most easily-broken setting in the project. |
-| `101` | `MAX_QUERY_CHARS = 2000` — rejects an essay pasted into the question box. |
-| `102` | `MAX_UPLOAD_BYTES` — `25 * 1024 * 1024` written as arithmetic rather than `26214400`, so a reader sees "25 MB" immediately. |
-| `105` | `API_URL` — where the UI looks for the API. `.rstrip("/")` prevents a double slash when paths are appended. |
-| `108-119` | **`embedding_fingerprint()`** — returns e.g. `"openai:nomic-embed-text"`. Stamped into the database so a mismatch can be detected. The docstring explains *why*: querying with the wrong model does not raise an error, it silently returns confident nonsense. |
-| `122-134` | **`missing_credentials()`** — returns a problem description or `""`. Returning a *string* rather than raising means the caller decides what to do. Note line `128`: a key is only required when `EMBEDDING_PROVIDER == "openai"`, because the local path needs none. |
+| `7-12` | Imports, then `load_dotenv()` — reads `.env` into the environment. **Runs at import**, so every later `os.getenv` sees it. |
+| `15` | `PROJECT_ROOT` — `__file__` is `app/config.py`; `.resolve()` makes it absolute; `.parent.parent` climbs to the project root. Absolute paths mean the app works from any directory. |
+| `16-18` | `documents/`, `chroma_db/`, and the collection name. |
+| `28-29` | `_SHARED_API_KEY` / `_SHARED_BASE_URL` — the old single pair, kept as a **fallback**. |
+| `33-37` | **Per-job credentials.** `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` and `CHAT_API_KEY` / `CHAT_BASE_URL`, each falling back to the shared pair. **This exists because sharing one variable was a real bug:** configuring a local chat model meant overwriting `OPENAI_API_KEY`, which silently disabled hosted embeddings. Now you can pay for embeddings and run chat free. |
+| `40-41` | The old names retained so nothing referring to them breaks. |
+| `50-51` | The two model names, both `os.getenv`-overridable so a gateway or local server can expose different names. |
+| `56` | `EMBEDDING_PROVIDER` — `"local"` or `"openai"`. Note `"openai"` really means *OpenAI-compatible*: Ollama is served through this path too. |
+| `61` | `LOCAL_EMBEDDING_MODEL` — ChromaDB's built-in, needs no key, but only a ~256-token window. |
+| `64` | `CHAT_TEMPERATURE = 0` — 0 means "always pick the most likely next word", so the same question gives the same answer. **This is what makes the app consistent (graded: M6B1).** |
+| `70-72` | Chunk sizes: parents 3000 chars (what the model reads), children 400 with 80 overlap (what gets searched). |
+| `76` | `MIN_HEADINGS_FOR_SECTIONS = 3` — below this, fall back to size-based parents. |
+| `79` | `MAX_HEADING_CHARS = 80` — a heading is short. |
+| `82` | `MIN_CHARS_FOR_TEXT_PAGE = 100` — a page with less is almost certainly a scan. |
+| `~88-92` | `CHUNK_WARN_CHARS` — a **conditional expression**, not a constant, because how much text an embedding model can read is a property of the model: ~1000 chars locally, ~30000 hosted. |
+| `94-95` | `TOP_K_CHILDREN = 8`, `TOP_K_PARENTS = 4`. Fetching 8 to keep 4 leaves room for several children sharing one parent. |
+| `~100-131` | **`MAX_DISTANCE`, keyed by MODEL NAME.** The most easily-broken setting in the project. The comment records the measured numbers: `nomic-embed-text` needs 0.375, `text-embedding-3-small` needs 0.52 — 40% apart on the same corpus. Running one at the other's value made the app refuse **10 of 23 answerable questions**. Unlisted models fall back to a permissive default, favouring answering over refusing. |
+| `134-135` | `MAX_QUERY_CHARS`, `MAX_UPLOAD_BYTES` — the latter written as `25 * 1024 * 1024` so a reader sees "25 MB" rather than decoding `26214400`. |
+| `138` | `API_URL` — where the UI finds the API. `.rstrip("/")` prevents a double slash when paths are appended. |
+| `141-152` | **`embedding_fingerprint()`** — e.g. `"openai:text-embedding-3-small"`. Stamped into the collection so a mismatch is detected. The docstring explains why: querying with the wrong model does not raise, it silently returns confident nonsense. |
+| `155-167` | **`missing_credentials()`** — returns a problem description or `""`. A *string* rather than an exception, so the caller decides what to do. A key is only required when `EMBEDDING_PROVIDER == "openai"`. |
 
 ---
 
@@ -153,7 +150,7 @@ two-pass retrieval and both anti-hallucination guards.
 | `36` | `_BATCH = 500` — chunks are sent in batches so memory stays flat and progress is visible. |
 | `41-42` | **`EmbeddingModelMismatch`** — our own exception type, so callers can catch exactly this. |
 | `46-62` | **`Retrieved`** — one parent section ready to cite. `match_type` records *why* it was found: `"semantic"` or `"exact"`. `citation()` includes the section **only if there is one**, since an empty label would render as a trailing `\|`. |
-| `65-79` | **`_embedding_function()`** — picks the embedder from config. The OpenAI path passes `api_base=config.OPENAI_BASE_URL`; **that single argument is why a company gateway or Ollama works with no code change.** |
+| `65-79` | **`_embedding_function()`** — picks the embedder from config. The OpenAI path passes `api_base=config.EMBEDDING_BASE_URL`; **that single argument is why a company gateway or Ollama works with no code change.** |
 | `82-85` | **`_client()`** — `PersistentClient` writes to disk; the in-memory client would lose everything on restart. |
 | `88-128` | **`get_collection()`** — opens or creates it. Chroma runs its **own** conflict check that fires before ours with an unhelpful message, so it is caught and re-raised as *"Run: python ingest.py --reset"*. Our own fingerprint check follows. `check_fingerprint=False` lets `/health` report on a mismatched database instead of crashing. |
 | `131-135` | **`reset()`** — deletes the folder. Required after changing embedding model. |
@@ -242,7 +239,7 @@ the logic, turn any failure into a clean message.
 | `24-28` | The FastAPI app. Title and description appear in the free interactive docs at `/docs`. |
 | `31-32` | **`AskRequest`** — a Pydantic model. `Field(...)` with `...` means **required**; FastAPI rejects a malformed body with a 422 before your code runs. |
 | `35-49` | `SourceOut` and `AskResponse` — the response shapes. Declaring them means the JSON is validated on the way out and documented automatically. |
-| `52-63` | **`GET /health`** — what is indexed, which embedding model built it, whether a key is set. `61` reports `api_key_configured` rather than "generation works", because a key existing is **not** the same as a key working. |
+| `52-63` | **`GET /health`** — what is indexed, which embedding model built it, whether a key is set. it reports `embedding_key_configured` and `chat_key_configured` **separately**, because the two jobs can use different providers — and because a key existing is not the same as a key working. |
 | `66-104` | **`POST /ask`**. `70` search. `71-73` a `ValueError` is the *user's* input problem, so its message is returned as the answer with no traceback. `74-81` anything else is logged with a full traceback and turned into a short notice. `83-85` distinguish "no documents at all" from "no match". `87` generate. `88-104` convert `Retrieved` objects into `SourceOut`; `97` rounds the distance for display. |
 | `107-153` | **POST /upload**. `108` `Annotated[UploadFile, File()]` is the modern FastAPI idiom (the older `= File(...)` default trips linters). `114` **`Path(...).name` strips any directory part — the uploaded filename is never trusted as a path**, which is what stops `../../etc/passwd`. `115-116` extension check. `118-121` write to a temporary directory that cleans itself up. `123-131` size check **after** writing, because a client-supplied length cannot be trusted. `133-136` parse, chunk, ingest. `137-138` a `ValueError` carries a readable message, so pass it through. `139-145` anything else is logged and generalised. `147-153` report how many chunks were added and how many pages were unreadable — **surfacing the gap rather than hiding it**. |
 

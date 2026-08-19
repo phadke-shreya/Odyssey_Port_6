@@ -54,19 +54,49 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Then open `.env` and fill it in:
+Then open `.env` and fill it in. **Embedding and chat are separate jobs with
+separate credentials**, so you can pay for one and run the other free — or point
+either at a company gateway — without the two interfering.
 
 ```ini
-OPENAI_API_KEY=sk-...
+# --- Embeddings ---
+#   openai = hosted, 8191-token window, needs a key
+#   local  = ChromaDB's built-in model, no key, but only a ~256-token window
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_API_KEY=sk-proj-...
+EMBEDDING_BASE_URL=            # blank = api.openai.com
 
-# Leave blank to use api.openai.com directly.
-# Set it only if you go through a company gateway / proxy.
-OPENAI_BASE_URL=
-
-# "local"  = embed on this machine, no key needed (default)
-# "openai" = embed via OpenAI, better quality, needs a working key
-EMBEDDING_PROVIDER=local
+# --- Chat (writing the answer) ---
+CHAT_MODEL=gpt-4o-mini
+CHAT_API_KEY=sk-proj-...
+CHAT_BASE_URL=                 # blank = api.openai.com
 ```
+
+**To run entirely free and offline**, install [Ollama](https://ollama.com) and use:
+
+```ini
+EMBEDDING_PROVIDER=openai      # "openai" just means OpenAI-compatible
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_API_KEY=ollama
+EMBEDDING_BASE_URL=http://localhost:11434/v1
+
+CHAT_MODEL=llama3.2
+CHAT_API_KEY=ollama
+CHAT_BASE_URL=http://localhost:11434/v1
+```
+
+Then `ollama pull nomic-embed-text llama3.2` and `python ingest.py --reset`.
+Both configurations score 100% on the retrieval eval; the hosted one writes
+better answers, the local one is free and needs no network.
+
+A single shared `OPENAI_API_KEY` / `OPENAI_BASE_URL` pair still works as a
+fallback for both jobs.
+
+⚠️ **Changing `EMBEDDING_MODEL` requires `python ingest.py --reset`, and the
+relevance threshold must be re-measured** — see "Measuring retrieval quality"
+below. This is not optional: running one model at another's threshold made the
+app answer "I don't know" to 10 of 23 answerable questions.
 
 `.env` is gitignored. Never commit it.
 
@@ -179,6 +209,18 @@ model, threshold, search strategy. `--sweep` is how the threshold was chosen:
 it prints in-scope recall against out-of-scope refusal across a range, and the
 value in `config.py` sits in the middle of the window where both are 100%.
 
+**The threshold belongs to the embedding model, not to the app.** Measured on
+this corpus:
+
+| Embedding model | In-scope tops out | Nearest excluded | Threshold |
+|---|---|---|---|
+| `nomic-embed-text` | 0.245 | 0.435 | **0.375** |
+| `text-embedding-3-small` | 0.479 | 0.562 | **0.52** |
+
+Both reach 100% on every metric *at their own threshold*. Using one model's
+threshold with the other is what caused 10 of 23 answerable questions to be
+refused, so `config.py` keys the value by model name.
+
 ## Project layout
 
 ```
@@ -204,8 +246,15 @@ chroma_db/         the vector database (created by ingest; gitignored)
 
 **`401 invalid_api_key`**
 The key is not recognised by `api.openai.com`. If it came from a company
-gateway, it will not work without `OPENAI_BASE_URL` set to that gateway's
-address. Ask whoever issued it for the base URL and the exact model names.
+gateway, it will not work without `EMBEDDING_BASE_URL` (and/or `CHAT_BASE_URL`)
+set to that gateway's address. Ask whoever issued it for the base URL and the
+exact model names.
+
+**Answerable questions get "I don't know"**
+Almost always the relevance threshold does not match the embedding model. Run
+`python eval/run_eval.py --sweep` and set the value for your model in
+`config.py`. Measured examples: `nomic-embed-text` needs ~0.375,
+`text-embedding-3-small` needs ~0.52 — a 40% difference on the same corpus.
 
 **`EmbeddingModelMismatch`**
 The database was built by a different embedding model. Run
@@ -252,7 +301,7 @@ Stated plainly, because knowing where a system is weak is part of using it.
 - **Answer wording depends on the model.** With a small local model such as
   `llama3.2`, the inline `(Source N)` pointer is occasionally missing or wrong.
   The Sources list is built by code and is always correct; only the model's
-  inline reference can be off. A larger model fixes it (`CHAT_MODEL=qwen2.5:7b`).
+  inline reference can be off. A hosted model such as `gpt-4o-mini` does not have this problem.
 - **Sparsely numbered documents get coarse sections.** With few headings,
   sections are large and get labelled `(part 3 of 16)`: accurate, but less
   useful than on a densely numbered document.

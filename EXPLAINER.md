@@ -136,9 +136,17 @@ must be **structured** — it must contain `.`, `-`, `#`, or mix letters with di
 
 ## 4c. Two guards on "I don't know"
 
-**Guard 1 — distance.** If nothing is close enough, refuse. Measured, not guessed:
-the sweep showed in-scope recall stays at 100% up to 0.40, and out-of-scope
-refusal stays at 100% down to 0.35, so the threshold sits at 0.375, in the middle.
+**Guard 1 — distance.** If nothing is close enough, refuse. Measured, not guessed
+— and the number **belongs to the embedding model, not the app**:
+
+| Model | In-scope tops out | Nearest excluded | Threshold |
+|---|---|---|---|
+| `nomic-embed-text` | 0.245 | 0.435 | 0.375 |
+| `text-embedding-3-small` | 0.479 | 0.562 | 0.52 |
+
+Those are 40% apart on the same corpus. Using one model's threshold with the
+other made the app answer "I don't know" to **10 of 23 questions the documents
+genuinely answer** — a silent failure caught only because the eval existed.
 
 **Guard 2 — named entities.** Distance alone cannot tell *"topically close"* from
 *"actually answers"*. Asking about **GDPR** scored 0.36 against a document about
@@ -159,7 +167,7 @@ someone asks about *"vacation days"*.
 | **pdfplumber** | Read PDFs | It extracts **tables as tables**. PyPDF2 gives you text soup where you cannot tell which number belongs to which column. |
 | **LangChain** | Split text, talk to the model | Its splitter cuts at the *nicest available seam* (paragraph → sentence → space → mid-word only as a last resort). It also gives one interface for any OpenAI-compatible model, which is why swapping OpenAI for a local model was a config change, not a rewrite. |
 | **ChromaDB** | Store and search the numbers | Persists to a folder on disk, so restarting doesn't lose the work. Understands "nearest neighbour" natively. Runs in-process — no separate database server to install. |
-| **OpenAI-compatible API** | Embeddings + answers | A standard shape that OpenAI, company gateways, and local servers (Ollama) all speak — so one code path serves all three. |
+| **OpenAI-compatible API** | Embeddings + answers | A standard shape that OpenAI, company gateways, and local servers (Ollama) all speak — so one code path serves all three. Embedding and chat have **separate** credentials, so you can pay for one and run the other free. |
 | **FastAPI** | The brain, as HTTP | Separating logic from screen means a Slack bot or mobile app could use the same `/ask` endpoint. Also gives free interactive docs at `/docs`. |
 | **Streamlit** | The screen | Chat-style interface in very little code, which is the right shape for document Q&A. |
 | **pytest** | Prove it works | 126 tests. Most exist because a real bug happened and must not come back. |

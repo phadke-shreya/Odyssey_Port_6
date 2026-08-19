@@ -115,9 +115,9 @@ def _build_llm():
         GenerationUnavailable: If no API key is configured, or the LangChain
             OpenAI package cannot be loaded.
     """
-    if not config.OPENAI_API_KEY:
+    if not config.CHAT_API_KEY:
         raise GenerationUnavailable(
-            "No OPENAI_API_KEY is set, so answers cannot be written. "
+            "No chat API key is set, so answers cannot be written. "
             "Retrieval and citations still work."
         )
     try:
@@ -128,8 +128,8 @@ def _build_llm():
     return ChatOpenAI(
         model=config.CHAT_MODEL,
         temperature=config.CHAT_TEMPERATURE,
-        api_key=config.OPENAI_API_KEY,
-        base_url=config.OPENAI_BASE_URL,
+        api_key=config.CHAT_API_KEY,
+        base_url=config.CHAT_BASE_URL,
         timeout=60,
         max_retries=1,
     )
@@ -145,8 +145,8 @@ def _friendly_error(error: Exception) -> str:
 
     if "authenticationerror" in name.lower() or "invalid_api_key" in text:
         return (
-            "The API key was rejected. Check OPENAI_API_KEY in your .env file "
-            "-- and if you use a company gateway, check OPENAI_BASE_URL too."
+            "The chat API key was rejected. Check CHAT_API_KEY in your .env "
+            "file -- and if you use a gateway, check CHAT_BASE_URL too."
         )
     if "notfound" in name.lower() or "model_not_found" in text:
         return (
@@ -158,7 +158,7 @@ def _friendly_error(error: Exception) -> str:
     if "connection" in name.lower() or "timeout" in name.lower():
         return (
             "Could not reach the AI service. Check your internet connection "
-            "and OPENAI_BASE_URL."
+            "and CHAT_BASE_URL."
         )
     return "The AI service returned an error ({}).".format(name)
 

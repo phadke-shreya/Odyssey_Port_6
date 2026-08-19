@@ -60,7 +60,7 @@ with st.sidebar:
 
         st.caption("Embedding model: {}".format(health.get("embedding_model")))
 
-        if not health.get("api_key_configured"):
+        if not health.get("chat_key_configured"):
             st.warning(
                 "No API key configured, so answers cannot be written. "
                 "Search and citations still work."

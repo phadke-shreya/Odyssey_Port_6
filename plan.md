@@ -730,6 +730,8 @@ reality differed, because that is the interesting part.
 | One `MAX_DISTANCE` constant | **Model-dependent, chosen from a sweep** | The number is a property of the embedding model. Switching models broke 8 tests because every distance shifted. |
 | "I don't know" from distance alone | **Distance + a named-entity check** | Distance cannot tell "topically close" from "answers the question". A GDPR question scored 0.36 against a document that never mentions GDPR. |
 | No evaluation planned | **`eval/run_eval.py`, 31 ground-truth questions** | Without it, every tuning decision was guesswork. This should have been built first. |
+| One API key for everything | **Separate credentials per job** | Sharing one variable meant configuring a local chat model overwrote the embedding key and silently disabled it. Embeddings and chat are different jobs and may use different providers. |
+| One relevance threshold | **Keyed by embedding model name** | The number is a property of the model, not the app: `nomic-embed-text` needs 0.375 and `text-embedding-3-small` needs 0.52. Running one at the other's value refused 10 of 23 answerable questions. |
 | IRS tax publications as test documents | **HR policy, lab safety SOP, product manual, compliance standard** | The first set worked technically but told the wrong story: the brief is about a company document library. |
 
 ### The bugs worth remembering
@@ -746,6 +748,10 @@ reality differed, because that is the interesting part.
    because our citations used the same `[n]` format the documents use.
 5. **A line-based parent splitter could not split a single 8800-character
    paragraph.** Caught by an existing test the moment the change was made.
+6. **Switching embedding model silently broke retrieval.** The threshold was
+   still the previous model's, so the app answered "I don't know" to 10 of 23
+   questions the documents clearly answer. Nothing crashed and no test failed --
+   only the eval caught it. This is the single best argument for having built it.
 
 ### What I would still do differently
 

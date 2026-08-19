@@ -18,11 +18,27 @@ CHROMA_DIR = PROJECT_ROOT / "chroma_db"
 CHROMA_COLLECTION = "smartdoc"
 
 # --- Credentials ---------------------------------------------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# Embedding and chat are separate jobs and may use DIFFERENT providers: paid
+# embeddings from OpenAI alongside a free local chat model, for instance. They
+# therefore get their own credentials. A single shared pair is still honoured as
+# a fallback, so an existing .env with only OPENAI_* keeps working.
+#
+# Sharing one variable between both jobs was a real bug: configuring a local
+# chat model meant overwriting OPENAI_API_KEY, which silently broke embeddings.
+_SHARED_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+_SHARED_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() or None
 
-# Blank means talk to api.openai.com directly. Set it to route through a
-# company gateway instead -- no code change needed, only this variable.
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() or None
+# Blank base URL means talk to api.openai.com directly. Set it to route through
+# a company gateway or a local server -- no code change needed.
+EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "").strip() or _SHARED_API_KEY
+EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "").strip() or _SHARED_BASE_URL
+
+CHAT_API_KEY = os.getenv("CHAT_API_KEY", "").strip() or _SHARED_API_KEY
+CHAT_BASE_URL = os.getenv("CHAT_BASE_URL", "").strip() or _SHARED_BASE_URL
+
+# Kept for anything that still refers to the old single-pair names.
+OPENAI_API_KEY = _SHARED_API_KEY
+OPENAI_BASE_URL = _SHARED_BASE_URL
 
 # --- Models --------------------------------------------------------------
 # Two DIFFERENT models doing two different jobs. Never swap them.
@@ -81,32 +97,37 @@ TOP_K_PARENTS = 4  # unique parents actually sent to the model
 # Cosine distance above which a chunk is treated as irrelevant. If every hit is
 # further away than this, the honest answer is "I don't know".
 #
-# This number is NOT model-independent. Different embedding models spread their
-# distances differently, so a threshold tuned for one lets out-of-scope
-# questions through on another. Measured on this document set:
+# THIS IS A PROPERTY OF THE EMBEDDING MODEL, NOT OF THE PROVIDER. Different
+# models spread their distances completely differently, so it is keyed by model
+# name. Getting this wrong is not a subtle degradation: running
+# text-embedding-3-small at the value tuned for nomic-embed-text made the app
+# answer "I don't know" to 10 of 23 questions the documents genuinely answer.
 #
-#   all-MiniLM-L6-v2   in-scope 0.22-0.34   out-of-scope 0.6+
-#   nomic-embed-text   in-scope 0.19-0.25   out-of-scope 0.43+
+# Measured on this corpus with `python eval/run_eval.py --sweep`:
 #
-# Re-measure after changing EMBEDDING_MODEL with: python eval/run_eval.py --sweep
-# It prints in-scope recall against out-of-scope refusal for a range of values.
+#   nomic-embed-text        in-scope <=0.245  nearest excluded 0.435  -> 0.375
+#   text-embedding-3-small  in-scope <=0.479  nearest excluded 0.562  -> 0.520
 #
-# Measured for nomic-embed-text on this corpus (23 in-scope, 10 out-of-scope):
+# Note how different those are. The same threshold cannot serve both.
 #
-#   threshold   in-scope kept   out-of-scope refused
-#     0.30            91%              100%
-#     0.35           100%              100%   <- window opens
-#     0.40           100%              100%   <- window closes
-#     0.45           100%               80%
-#     0.55           100%               10%
-#
-# The safe window is [0.35, 0.40], so 0.375 sits in the middle of it with margin
-# on both sides. Picking an edge value would leave no room for a document set
-# slightly harder than this one.
-_MAX_DISTANCE_LOCAL = 0.55
-_MAX_DISTANCE_HOSTED = 0.375
-MAX_DISTANCE = (
-    _MAX_DISTANCE_HOSTED if EMBEDDING_PROVIDER == "openai" else _MAX_DISTANCE_LOCAL
+# Each value below sits inside its measured window, not at an edge. Re-measure
+# after changing EMBEDDING_MODEL -- and if a model is missing here it falls back
+# to a deliberately permissive default, which favours answering over refusing.
+_MAX_DISTANCE_BY_MODEL = {
+    "nomic-embed-text": 0.375,
+    "text-embedding-3-small": 0.52,
+    # Same family and geometry as -small, but not separately measured here.
+    "text-embedding-3-large": 0.52,
+    # ChromaDB's local default.
+    "all-MiniLM-L6-v2": 0.55,
+}
+_MAX_DISTANCE_DEFAULT = 0.55
+
+_active_embedding_model = (
+    EMBEDDING_MODEL if EMBEDDING_PROVIDER == "openai" else LOCAL_EMBEDDING_MODEL
+)
+MAX_DISTANCE = _MAX_DISTANCE_BY_MODEL.get(
+    _active_embedding_model, _MAX_DISTANCE_DEFAULT
 )
 
 # --- Input limits --------------------------------------------------------
@@ -137,10 +158,10 @@ def missing_credentials() -> str:
     Called at startup so a missing key is reported once, clearly, instead of
     surfacing as a confusing failure in the middle of a user's question.
     """
-    if EMBEDDING_PROVIDER == "openai" and not OPENAI_API_KEY:
+    if EMBEDDING_PROVIDER == "openai" and not EMBEDDING_API_KEY:
         return (
-            "OPENAI_API_KEY is not set, but EMBEDDING_PROVIDER is 'openai'. "
-            "Add the key to .env, or set EMBEDDING_PROVIDER=local to embed on "
-            "this machine instead."
+            "EMBEDDING_PROVIDER is 'openai' but no key is set. Add "
+            "EMBEDDING_API_KEY (or OPENAI_API_KEY) to .env, or set "
+            "EMBEDDING_PROVIDER=local to embed on this machine instead."
         )
     return ""
