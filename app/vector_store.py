@@ -230,12 +230,34 @@ def identifier_terms(question: str) -> list[str]:
     return terms
 
 
+def _is_whole_identifier(term: str, text: str) -> bool:
+    """Whether `term` appears in `text` as an identifier, not inside a number.
+
+    Chroma's $contains is a plain substring match, which is too blunt for short
+    identifiers. Asking about "section 3.5" matched, in a different document
+    each time:
+
+        "3.5mm from module edge"   -- a screw-hole dimension
+        "4mA default | 3.5 | 5.3"  -- a current rating
+        "206.543.5677"             -- a phone number
+
+    So the match is re-checked here with the boundaries a real identifier has.
+    A trailing dot is allowed, because "3.5. Identification and Authentication"
+    is exactly the heading being looked for, but a trailing dot followed by a
+    digit is not -- that is a longer number such as "3.5.7".
+    """
+    pattern = r"(?<![A-Za-z0-9.]){}(?!\.?[A-Za-z0-9])".format(re.escape(term))
+    return re.search(pattern, text) is not None
+
+
 def _keyword_candidates(collection: Collection, terms: list[str]) -> list[dict]:
-    """Find chunks containing an identifier literally.
+    """Find chunks containing an identifier literally, as a whole identifier.
 
     Chroma's substring filter is case-sensitive, so a couple of casings are
-    tried. Failures are ignored: a literal pass is an enhancement, and it must
-    never be the reason a search breaks.
+    tried, and every hit is then re-checked by _is_whole_identifier because a
+    substring match alone produces cross-document nonsense. Failures are
+    ignored: a literal pass is an enhancement, and it must never be the reason a
+    search breaks.
     """
     seen: set[str] = set()
     found: list[dict] = []
@@ -246,19 +268,27 @@ def _keyword_candidates(collection: Collection, terms: list[str]) -> list[dict]:
                 result = collection.get(
                     where_document={"$contains": variant},
                     limit=_KEYWORD_LIMIT,
-                    include=["metadatas"],
+                    include=["metadatas", "documents"],
                 )
             except Exception:  # noqa: BLE001 - never let this break a search
                 logger.debug("Literal lookup failed for %r", variant)
                 continue
             ids = result.get("ids") or []
             metadatas = result.get("metadatas") or []
-            for identifier, metadata in zip(ids, metadatas, strict=False):
+            documents = result.get("documents") or []
+            matched = False
+            for identifier, metadata, document in zip(
+                ids, metadatas, documents, strict=False
+            ):
+                if not _is_whole_identifier(variant, document or ""):
+                    logger.debug("Rejected %r: matched inside a longer number", variant)
+                    continue
+                matched = True
                 if identifier in seen:
                     continue
                 seen.add(identifier)
                 found.append(metadata)
-            if ids:
+            if matched:
                 break  # this casing worked; do not try the others
 
     if found:
@@ -399,6 +429,40 @@ def _names_something_absent(question: str, results: list[Retrieved]) -> bool:
     return True
 
 
+def _drop_semantic_padding(results: list[Retrieved]) -> list[Retrieved]:
+    """Keep only exact matches, if there are any.
+
+    When the question names an identifier, a NEAR-MISS identifier is actively
+    misleading rather than merely useless. NIST controls are near-identical in
+    shape -- same register, same "Implement... / Define... / Review..." phrasing --
+    so a question about 03.05.03 pulls in 03.04.03 at a comfortable 0.43, well
+    inside the threshold. The embedding cannot see that one digit changes which
+    control is being discussed, which is the whole reason the literal pass exists.
+
+    Sending both invites the model to blend them: "03.05.03 requires multi-factor
+    authentication and review of proposed configuration changes" is confidently
+    wrong and correctly cited, which is the worst failure shape available to a RAG
+    system.
+
+    Measured on eval/questions.json before adding this: of the 8 identifier
+    questions, 6 came back padded with semantic matches; dropping them lost no
+    grounding and no expected document, and the exact hits still carried
+    1699-8581 characters of context. The 23 ordinary questions and all 14
+    refusal questions produce NO exact matches at all, so this cannot reach them
+    -- in particular it cannot loosen the out-of-scope guards.
+    """
+    exact = [result for result in results if result.match_type == "exact"]
+    if not exact:
+        return results
+    if len(exact) != len(results):
+        logger.info(
+            "Identifier question: kept %s exact matches, dropped %s semantic",
+            len(exact),
+            len(results) - len(exact),
+        )
+    return exact
+
+
 def search(question: str) -> list[Retrieved]:
     """Find the parent sections most likely to answer a question.
 
@@ -432,8 +496,11 @@ def search(question: str) -> list[Retrieved]:
     _literal_pass(collection, cleaned, best)
     examined = _semantic_pass(collection, cleaned, best)
 
-    ranked = sorted(
-        best.values(), key=lambda r: (0 if r.match_type == "exact" else 1, r.distance)
+    ranked = _drop_semantic_padding(
+        sorted(
+            best.values(),
+            key=lambda r: (0 if r.match_type == "exact" else 1, r.distance),
+        )
     )
     if _names_something_absent(cleaned, ranked):
         return []

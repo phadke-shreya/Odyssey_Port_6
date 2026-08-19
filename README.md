@@ -172,7 +172,7 @@ curl -X POST http://127.0.0.1:8006/ask \
 ## Tests
 
 ```bash
-pytest -q                            # 151 tests
+pytest -q                            # 164 tests
 black --check app tests eval tools   # formatting
 ruff check app tests eval tools      # linting
 python tools/check_conventions.py    # the conventions in CLAUDE.md
@@ -246,7 +246,7 @@ app/
   main.py          FastAPI endpoints
 streamlit_app.py   the UI (display only; calls the API over HTTP)
 ingest.py          load every PDF in documents/
-tests/             151 tests, including architecture boundaries
+tests/             164 tests, including architecture boundaries
 eval/              questions.json + run_eval.py (retrieval metrics)
 .github/workflows/ CI: lint, build the index, test, measure retrieval
 documents/         your PDFs
