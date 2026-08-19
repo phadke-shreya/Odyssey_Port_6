@@ -724,8 +724,7 @@ reality differed, because that is the interesting part.
 
 | Plan said | What happened | Why |
 |---|---|---|
-| Embeddings via OpenAI `text-embedding-3-small` | **`nomic-embed-text` via Ollama** | The available API key was a gateway key with no base URL, so both models moved local. Same 8k-token window, no cost, no key. |
-| Answers via Claude | **`llama3.2` via Ollama** | Same reason. The brief did not mandate a provider. |
+| Embeddings via OpenAI `text-embedding-3-small`, answers via `gpt-4o-mini` | **Exactly that in the end -- but only after a detour through `nomic-embed-text` and `llama3.2` on Ollama** | The key appeared not to work, so both models moved local rather than lose build time to debugging credentials. Once it was working, both moved back. The detour paid for itself: running two different embedding models over the same corpus is what exposed that `MAX_DISTANCE` is a property of the model, not of the app -- see the row below and bug 6. The Ollama path is still supported and still scores 100% on the eval; README documents it as the free, no-key option. |
 | Vector search only | **Vector + exact-identifier search** | Measured: identifier questions like "what does Table 2-2 show?" scored 62% Hit@1 with vectors alone, 100% with a literal-match pass. |
 | One `MAX_DISTANCE` constant | **Model-dependent, chosen from a sweep** | The number is a property of the embedding model. Switching models broke 8 tests because every distance shifted. |
 | "I don't know" from distance alone | **Distance + a named-entity check** | Distance cannot tell "topically close" from "answers the question". A GDPR question scored 0.36 against a document that never mentions GDPR. |
@@ -752,6 +751,24 @@ reality differed, because that is the interesting part.
    still the previous model's, so the app answered "I don't know" to 10 of 23
    questions the documents clearly answer. Nothing crashed and no test failed --
    only the eval caught it. This is the single best argument for having built it.
+
+7. **The literal-match pass matched a phone number.** Chroma's `$contains` is a
+   plain substring filter, so asking "tell me about section 3.5" returned
+   `3.5mm from module edge` (a screw-hole dimension), a current rating of `3.5`,
+   and `206.543.5677` -- three different documents, none of which has a section
+   3.5. Found only because someone asked what happens when the question is broad.
+   Fixed by re-checking each hit for the boundaries a real identifier has. Still
+   imperfect: a bare `3.5` alone in a table cell is a whole token, so telling it
+   from a section number needs the surrounding structure, not the string.
+
+8. **An identifier question dragged in the neighbouring identifier.** "What does
+   control 03.05.03 require?" also retrieved `03.04.03 Configuration Change
+   Control` at distance 0.4331 -- inside the threshold, because NIST controls are
+   near-identical in shape and one digit barely moves an embedding. Given both, a
+   small model can blend them into an answer that is wrong and correctly cited,
+   which is the worst failure shape here. Now an identifier question returns only
+   its exact matches; measured first, so the rule provably cannot reach the 23
+   ordinary or 14 refusal questions, none of which produce an exact match at all.
 
 ### What I would still do differently
 
