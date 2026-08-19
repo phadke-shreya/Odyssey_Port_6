@@ -19,8 +19,14 @@ Built with FastAPI, LangChain, ChromaDB and Streamlit.
 | **"I don't know" is structural** | Decided by retrieval distance *before* the model is called, so an out-of-scope question never reaches the LLM. |
 | **Answers cannot lose their sources** | Text and citations travel in one object; no code path returns text alone. |
 
-Full reasoning, including the tradeoffs, is in [plan.md](plan.md). Coding rules
-are in [CLAUDE.md](CLAUDE.md).
+## Documentation
+
+| File | What it covers |
+|---|---|
+| [EXPLAINER.md](EXPLAINER.md) | What this does and why each tool was chosen, in plain language |
+| [CODE_WALKTHROUGH.md](CODE_WALKTHROUGH.md) | Every file, line by line |
+| [plan.md](plan.md) | The design and its tradeoffs, including known failure modes |
+| [CLAUDE.md](CLAUDE.md) | Coding conventions and the invariants that must not break |
 
 ---
 
