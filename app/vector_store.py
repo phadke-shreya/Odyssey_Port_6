@@ -192,6 +192,10 @@ _TOKEN = re.compile(r"[A-Za-z0-9#][A-Za-z0-9._#/-]*")
 # defeat the out-of-scope refusal.
 _STRUCTURED = re.compile(r"[.#/-]")
 
+# Digits and dots only: "3.5", "03.05.03". Anything with a letter, a "#" or a
+# hyphen carries its own evidence of being an identifier; a bare number does not.
+_BARE_NUMERIC = re.compile(r"^[0-9][0-9.]*$")
+
 # How many literal matches to accept per term. Small: a term appearing in
 # hundreds of chunks is not an identifier, it is a common word.
 _KEYWORD_LIMIT = 5
@@ -237,17 +241,32 @@ def _is_whole_identifier(term: str, text: str) -> bool:
     identifiers. Asking about "section 3.5" matched, in a different document
     each time:
 
-        "3.5mm from module edge"   -- a screw-hole dimension
-        "4mA default | 3.5 | 5.3"  -- a current rating
-        "206.543.5677"             -- a phone number
+        "3.5mm from module edge"      -- a screw-hole dimension
+        "4mA default | 3.5 | 5.3"     -- a current rating in a table
+        "206.543.5677"                -- a phone number
 
-    So the match is re-checked here with the boundaries a real identifier has.
-    A trailing dot is allowed, because "3.5. Identification and Authentication"
-    is exactly the heading being looked for, but a trailing dot followed by a
-    digit is not -- that is a longer number such as "3.5.7".
+    Two rules, because two different things are being ruled out.
+
+    First, boundaries: the term must not sit inside a longer number. A trailing
+    dot is allowed, because "3.5. Identification and Authentication" is exactly
+    the heading being looked for, but a trailing dot followed by a digit is not
+    -- that is a longer number such as "3.5.7".
+
+    Second, for a BARE number only, position: boundaries alone still admit the
+    table cell, where "3.5" is a whole token. A section number appears where
+    section numbers appear, at the start of its own line, because that is how the
+    heading was written and how the chunker split it. A table cell is not, and
+    neither is a cross-reference in running prose. Terms that carry their own
+    evidence of being an identifier -- a label word, a "#", letters, a hyphen --
+    skip this second rule and keep matching anywhere in a chunk.
     """
-    pattern = r"(?<![A-Za-z0-9.]){}(?!\.?[A-Za-z0-9])".format(re.escape(term))
-    return re.search(pattern, text) is not None
+    escaped = re.escape(term)
+    boundaries = r"(?<![A-Za-z0-9.]){}(?!\.?[A-Za-z0-9])".format(escaped)
+    if not _BARE_NUMERIC.match(term):
+        return re.search(boundaries, text) is not None
+
+    at_line_start = r"(?m)^\s*{}(?!\.?[A-Za-z0-9])".format(escaped)
+    return re.search(at_line_start, text) is not None
 
 
 def _keyword_candidates(collection: Collection, terms: list[str]) -> list[dict]:

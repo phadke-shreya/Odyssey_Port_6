@@ -255,6 +255,15 @@ def test_a_control_question_never_returns_a_different_control() -> None:
         ("3.5", "version 10.3.5 released", False),
         ("3.5", "see 3.5.7 below", False),
         ("GPIO14", "GPIO145 is not a pin", False),
+        # A bare number is only a section number where section numbers live:
+        # at the start of its own line. These two are a table cell and a
+        # cross-reference in prose, and boundaries alone let both through.
+        ("3.5", "| I O(gpio) | Output current | 4mA default | 3.5 | 5.3 |", False),
+        ("3.5", "see section 3.5 below for detail", False),
+        ("3.5", "Chapter 3\n3.5. Identification and Authentication", True),
+        # Terms carrying their own evidence stay matchable mid-line.
+        ("Table 2-2", "see Table 2-2 for the exposure limits", True),
+        ("03.06.04", "  03.06.04 Incident Response Training", True),
     ],
 )
 def test_a_literal_match_must_be_a_whole_identifier(

@@ -253,8 +253,8 @@ meaning. Measured on the eval set, identifier questions scored **62% Hit@1 and
 | `206` | `_TOKEN` — note the leading `#` is allowed, so `Policy #14` yields the token `#14`. Without it the regex skipped the `#`, left `14`, and rejected it as too short. |
 | `193` | **`_STRUCTURED`** — the safety rule. An identifier must contain `.`, `#`, `/` or `-`, **or** mix letters with digits. A bare number is deliberately excluded: otherwise the year in *"Who won the World Cup in 2022?"* would trigger a literal lookup and could defeat the refusal. |
 | `216` | `_KEYWORD_LIMIT = 5` — a term appearing in hundreds of chunks is a common word, not an identifier. |
-| `200-230` | **`identifier_terms()`** — walks the question's words, keeps tokens with a digit that pass the structure rule, and prefixes a label word when one precedes it. Returns most-specific first. |
-| `253-296` | **`_keyword_candidates()`** — literal lookup via Chroma's `where_document={"$contains": ...}`. It is **case-sensitive**, so a couple of casings are tried and the loop stops at the first that hits. Every failure is swallowed and logged: a literal pass is an enhancement and must never be the reason a search breaks. |
+| `204-234` | **`identifier_terms()`** — walks the question's words, keeps tokens with a digit that pass the structure rule, and prefixes a label word when one precedes it. Returns most-specific first. |
+| `272-315` | **`_keyword_candidates()`** — literal lookup via Chroma's `where_document={"$contains": ...}`. It is **case-sensitive**, so a couple of casings are tried and the loop stops at the first that hits. Every failure is swallowed and logged: a literal pass is an enhancement and must never be the reason a search breaks. |
 
 ### Pass 2 guard — named entities (lines 296–312)
 
@@ -262,8 +262,8 @@ meaning. Measured on the eval set, identifier questions scored **62% Hit@1 and
 |---|---|
 | `296` | `_ACRONYM` — matches an ALL-CAPS 3–8 letter token. |
 | `299` | `_COMMON_ACRONYMS` — words too common to be evidence of anything. |
-| `313-317` | **`named_entities()`** — acronyms the question names. |
-| `320-323` | **`_mentions_all()`** — whether every named entity appears somewhere in the retrieved text. |
+| `332-336` | **`named_entities()`** — acronyms the question names. |
+| `339-342` | **`_mentions_all()`** — whether every named entity appears somewhere in the retrieved text. |
 
 **Why only acronyms.** Distance cannot distinguish *"topically close"* from
 *"actually answers"*: a question about **GDPR** scored 0.36 against a document on
@@ -280,10 +280,10 @@ bookkeeping — and the two passes really do answer different questions.
 
 | Lines | What it does |
 |---|---|
-| `339-354` | **`_validated()`** — empty and over-long questions raise `ValueError` with a sentence a user can act on. Returns the stripped question, so the caller cannot forget to use the cleaned form. |
-| `357-372` | **`_literal_pass()`** — exact identifier matches, added to the `best` dict in place. An exact hit on `03.05.03` is not a guess, so it is **exempt from the distance threshold** and recorded at distance `0.0`, which makes it sort above anything semantic. |
-| `375-404` | **`_semantic_pass()`** — the vector query for `TOP_K_CHILDREN` children (`min(..., count())` avoids asking for more than exist), then nearest-neighbour matches gated by `MAX_DISTANCE`. Only the nearest hit per parent is kept, and an exact match already in `best` is never overwritten. Returns how many children were examined, purely so the log line can report it. |
-| `407-429` | **`_names_something_absent()`** — **Guard 2** as a named predicate. True when the question names an entity no retrieved section mentions, which is when a close distance is not an answer. Exempt when an exact identifier matched, since that is already proof the right chunk was found. |
+| `358-373` | **`_validated()`** — empty and over-long questions raise `ValueError` with a sentence a user can act on. Returns the stripped question, so the caller cannot forget to use the cleaned form. |
+| `376-391` | **`_literal_pass()`** — exact identifier matches, added to the `best` dict in place. An exact hit on `03.05.03` is not a guess, so it is **exempt from the distance threshold** and recorded at distance `0.0`, which makes it sort above anything semantic. |
+| `394-423` | **`_semantic_pass()`** — the vector query for `TOP_K_CHILDREN` children (`min(..., count())` avoids asking for more than exist), then nearest-neighbour matches gated by `MAX_DISTANCE`. Only the nearest hit per parent is kept, and an exact match already in `best` is never overwritten. Returns how many children were examined, purely so the log line can report it. |
+| `426-448` | **`_names_something_absent()`** — **Guard 2** as a named predicate. True when the question names an entity no retrieved section mentions, which is when a close distance is not an answer. Exempt when an exact identifier matched, since that is already proof the right chunk was found. |
 
 ### `search()` (lines 402–448)
 

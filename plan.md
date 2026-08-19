@@ -757,9 +757,13 @@ reality differed, because that is the interesting part.
    `3.5mm from module edge` (a screw-hole dimension), a current rating of `3.5`,
    and `206.543.5677` -- three different documents, none of which has a section
    3.5. Found only because someone asked what happens when the question is broad.
-   Fixed by re-checking each hit for the boundaries a real identifier has. Still
-   imperfect: a bare `3.5` alone in a table cell is a whole token, so telling it
-   from a section number needs the surrounding structure, not the string.
+   Fixed in two rules, because two different things needed ruling out. Boundaries
+   first, so the term cannot sit inside a longer number. Then, for a bare number
+   only, position: a section number appears at the start of its own line, because
+   that is how the heading was written. Boundaries alone still admitted the table
+   cell, where `3.5` is a whole token. Terms carrying their own evidence -- a
+   label word, a `#`, letters, a hyphen -- skip the second rule and stay
+   matchable anywhere.
 
 8. **An identifier question dragged in the neighbouring identifier.** "What does
    control 03.05.03 require?" also retrieved `03.04.03 Configuration Change
