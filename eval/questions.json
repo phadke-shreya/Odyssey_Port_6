@@ -1,0 +1,182 @@
+{
+  "note": "Ground truth for retrieval quality. 'expected_doc' is the document that should answer the question; 'must_contain' is a phrase that should appear in at least one retrieved section. Validated by run_eval.py before any metric is computed, so a wrong expectation is caught rather than silently scoring the system down.",
+  "in_scope": [
+    {
+      "q": "How much sick leave do employees get?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "sick leave"
+    },
+    {
+      "q": "When can the City require overtime from employees?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "overtime"
+    },
+    {
+      "q": "What kind of conduct can lead to disciplinary action?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "discipline"
+    },
+    {
+      "q": "How does compensatory time off work?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "compensatory"
+    },
+    {
+      "q": "What does the Employee Assistance Program cover?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "counseling"
+    },
+    {
+      "q": "Is sexual harassment grounds for dismissal?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "harassment"
+    },
+    {
+      "q": "What happens to my pay when I am called for jury duty?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "jury"
+    },
+    {
+      "q": "What personal protective equipment is required in the lab?",
+      "expected_doc": "SOP_Laboratory_Safety_Manual.pdf",
+      "must_contain": "protective equipment"
+    },
+    {
+      "q": "Who should I contact in a laboratory emergency?",
+      "expected_doc": "SOP_Laboratory_Safety_Manual.pdf",
+      "must_contain": "emergency"
+    },
+    {
+      "q": "How must hazardous chemicals be stored?",
+      "expected_doc": "SOP_Laboratory_Safety_Manual.pdf",
+      "must_contain": "chemical"
+    },
+    {
+      "q": "What training is required before working in a laboratory?",
+      "expected_doc": "SOP_Laboratory_Safety_Manual.pdf",
+      "must_contain": "training"
+    },
+    {
+      "q": "What is the operating temperature range of the module?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "temperature"
+    },
+    {
+      "q": "How many GPIO pins are available?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "GPIO"
+    },
+    {
+      "q": "Does the module support dual HDMI output?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "HDMI"
+    },
+    {
+      "q": "Which PCIe generation and lane count are supported?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "PCIe"
+    },
+    {
+      "q": "What should I check if the board does not boot?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "boot"
+    },
+    {
+      "q": "What are the power supply requirements?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "power"
+    },
+    {
+      "q": "What are the mechanical dimensions of the module?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "mechanical"
+    },
+    {
+      "q": "What are the requirements for multifactor authentication?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "authentication"
+    },
+    {
+      "q": "What must be done to media before it is disposed of?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "sanitiz"
+    },
+    {
+      "q": "What incident response training is required?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "incident response"
+    },
+    {
+      "q": "How should supply chain risk be managed?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "supply chain"
+    },
+    {
+      "q": "What are the rules for remote access to systems?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "remote access"
+    }
+  ],
+  "out_of_scope": [
+    "What is the capital of Peru?",
+    "Who won the football World Cup in 2022?",
+    "How do I bake sourdough bread?",
+    "What is the weather today?",
+    "Write me a poem about penguins.",
+    "What is my bank account balance?",
+    "What is the tallest mountain in the world?",
+    "Who is the current prime minister of Japan?",
+    "What time does the moon rise tomorrow?",
+    "Recommend a good restaurant nearby."
+  ],
+  "near_miss_note": "Topically close to the corpus but NOT answered by it. These are the hard cases: distance alone may let them through. Reported, not gated, because ground truth here is a judgement call.",
+  "near_miss": [
+    "How do I install Windows 11 on the Compute Module?",
+    "What are the GDPR penalties for a data breach?",
+    "What is the starting salary for a software engineer?",
+    "How do I calibrate a mass spectrometer?"
+  ],
+  "hard_note": "Deliberately difficult cases. Exact identifiers (Policy #37, Table 2-2, GPIO14, 03.05.03) are where pure vector search is weakest: an embedding of a code carries almost no meaning, so a keyword match is needed to find it reliably. These questions exist to make the eval discriminating.",
+  "hard": [
+    {
+      "q": "What does Policy #37 cover?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "Policy #37"
+    },
+    {
+      "q": "What is in Policy #14?",
+      "expected_doc": "HR_Employee_Policy.pdf",
+      "must_contain": "Policy #14"
+    },
+    {
+      "q": "What does Table 2-2 show?",
+      "expected_doc": "SOP_Laboratory_Safety_Manual.pdf",
+      "must_contain": "Table 2-2"
+    },
+    {
+      "q": "What is listed in Table 3-1?",
+      "expected_doc": "SOP_Laboratory_Safety_Manual.pdf",
+      "must_contain": "Table 3-1"
+    },
+    {
+      "q": "What is GPIO14 used for?",
+      "expected_doc": "Product_Manual_ComputeModule4.pdf",
+      "must_contain": "GPIO14"
+    },
+    {
+      "q": "What does control 03.05.03 require?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "03.05.03"
+    },
+    {
+      "q": "What does requirement 03.06.04 say?",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "03.06.04"
+    },
+    {
+      "q": "Explain 03.08.03.",
+      "expected_doc": "Compliance_Standard_NIST_800-171.pdf",
+      "must_contain": "03.08.03"
+    }
+  ]
+}
