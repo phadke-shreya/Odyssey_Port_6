@@ -39,6 +39,7 @@ class SourceOut(BaseModel):
     section: str
     content_type: str
     distance: float
+    match_type: str
     text: str
 
 
@@ -95,6 +96,7 @@ def ask(request: AskRequest) -> AskResponse:
                 section=s.section,
                 content_type=s.content_type,
                 distance=round(s.distance, 4),
+                match_type=s.match_type,
                 text=s.text,
             )
             for s in result.sources

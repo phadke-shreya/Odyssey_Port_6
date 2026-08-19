@@ -15,6 +15,7 @@ Two things here carry most of the design weight:
 """
 
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 
@@ -51,6 +52,7 @@ class Retrieved:
     section: str
     content_type: str
     distance: float
+    match_type: str = "semantic"
 
     def citation(self) -> str:
         """Format this source the way it is shown to the user."""
@@ -178,6 +180,151 @@ def ingest(chunks: list[Chunk]) -> int:
     return len(ids)
 
 
+# Pure vector search is weak on exact identifiers: an embedding of "Table 2-2"
+# or "03.05.03" carries almost no meaning, so the right chunk may never surface.
+# These constants drive a literal-match pass that complements it.
+
+# Words that commonly label an identifier, so "Table 2-2" is searched as a phrase.
+_LABEL_WORDS = frozenset(
+    {
+        "table",
+        "policy",
+        "section",
+        "figure",
+        "chapter",
+        "requirement",
+        "control",
+        "appendix",
+        "step",
+        "clause",
+        "form",
+        "part",
+    }
+)
+
+# Leading "#" is allowed so "Policy #14" yields the token "#14".
+_TOKEN = re.compile(r"[A-Za-z0-9#][A-Za-z0-9._#/-]*")
+
+# An identifier must be STRUCTURED: it contains punctuation or mixes letters
+# with digits. A bare number is deliberately excluded -- otherwise the year in
+# "Who won the World Cup in 2022?" would trigger a literal lookup and could
+# defeat the out-of-scope refusal.
+_STRUCTURED = re.compile(r"[.#/-]")
+
+# How many literal matches to accept per term. Small: a term appearing in
+# hundreds of chunks is not an identifier, it is a common word.
+_KEYWORD_LIMIT = 5
+
+
+def identifier_terms(question: str) -> list[str]:
+    """Pull exact identifiers out of a question, longest and most specific first.
+
+    "What does Table 2-2 show?" yields ["Table 2-2", "2-2"], so the precise
+    phrase is tried before the bare token.
+    """
+    words = question.split()
+    terms: list[str] = []
+
+    for index, word in enumerate(words):
+        token = _TOKEN.search(word)
+        if not token:
+            continue
+        candidate = token.group(0).strip(".,;:")
+        if len(candidate) < 3 or not any(c.isdigit() for c in candidate):
+            continue
+        has_letters = any(c.isalpha() for c in candidate)
+        if not (_STRUCTURED.search(candidate) or has_letters):
+            continue  # a bare number is not an identifier
+
+        # Prefer "Table 2-2" over "2-2" when a label word precedes it.
+        if index > 0:
+            previous = words[index - 1].strip(".,;:").lower()
+            if previous in _LABEL_WORDS:
+                phrase = "{} {}".format(words[index - 1].strip(".,;:"), candidate)
+                if phrase not in terms:
+                    terms.append(phrase)
+        if candidate not in terms:
+            terms.append(candidate)
+
+    return terms
+
+
+def _keyword_candidates(collection, terms: list[str]) -> list[dict]:
+    """Find chunks containing an identifier literally.
+
+    Chroma's substring filter is case-sensitive, so a couple of casings are
+    tried. Failures are ignored: a literal pass is an enhancement, and it must
+    never be the reason a search breaks.
+    """
+    seen: set[str] = set()
+    found: list[dict] = []
+
+    for term in terms:
+        for variant in dict.fromkeys([term, term.upper(), term.lower()]):
+            try:
+                result = collection.get(
+                    where_document={"$contains": variant},
+                    limit=_KEYWORD_LIMIT,
+                    include=["metadatas"],
+                )
+            except Exception:  # noqa: BLE001 - never let this break a search
+                logger.debug("Literal lookup failed for %r", variant)
+                continue
+            ids = result.get("ids") or []
+            metadatas = result.get("metadatas") or []
+            for identifier, metadata in zip(ids, metadatas, strict=False):
+                if identifier in seen:
+                    continue
+                seen.add(identifier)
+                found.append(metadata)
+            if ids:
+                break  # this casing worked; do not try the others
+
+    if found:
+        logger.info("Literal match on %s -> %s chunk(s)", terms, len(found))
+    return found
+
+
+# An ALL-CAPS acronym in a question names something specific: GDPR, HIPAA, OSHA,
+# FMLA. If the corpus never mentions it, a close distance is a topical near-miss
+# rather than an answer -- "GDPR penalties" scores 0.36 against a document about
+# US compliance that says nothing about GDPR.
+#
+# Deliberately narrow. Requiring ordinary words to overlap would break the whole
+# point of embeddings, which is finding "annual leave" when asked about
+# "vacation days". Only named entities are checked.
+_ACRONYM = re.compile(r"\b[A-Z]{3,8}\b")
+
+# Acronyms too common to be evidence of anything.
+_COMMON_ACRONYMS = frozenset({"THE", "AND", "FOR", "WHAT", "HOW", "WHO", "WHY", "PDF"})
+
+
+def named_entities(question: str) -> list[str]:
+    """Acronyms the question names, which the answer ought to mention."""
+    return [
+        token for token in _ACRONYM.findall(question) if token not in _COMMON_ACRONYMS
+    ]
+
+
+def _mentions_all(entities: list[str], results: list[Retrieved]) -> bool:
+    """Whether at least one retrieved section mentions each named entity."""
+    haystack = " ".join(r.text for r in results).lower()
+    return all(entity.lower() in haystack for entity in entities)
+
+
+def _to_retrieved(metadata: dict, distance: float, match_type: str) -> Retrieved:
+    """Build a Retrieved from stored metadata."""
+    return Retrieved(
+        text=str(metadata.get("parent_text", "")),
+        source=str(metadata.get("source", "")),
+        page=int(metadata.get("page", 0)),
+        section=str(metadata.get("section", "")),
+        content_type=str(metadata.get("content_type", "")),
+        distance=distance,
+        match_type=match_type,
+    )
+
+
 def search(question: str) -> list[Retrieved]:
     """Find the parent sections most likely to answer a question.
 
@@ -210,32 +357,54 @@ def search(question: str) -> list[Retrieved]:
         query_texts=[cleaned],
         n_results=min(config.TOP_K_CHILDREN, collection.count()),
     )
-
     metadatas = (found.get("metadatas") or [[]])[0]
     distances = (found.get("distances") or [[]])[0]
 
     # Keep the best (nearest) hit per parent, so one section appears once.
     best: dict[str, Retrieved] = {}
+
+    # Pass 1: literal identifier matches. An exact hit on "03.05.03" is not a
+    # guess, so it is not subject to the distance threshold and it outranks
+    # anything semantic.
+    terms = identifier_terms(cleaned)
+    if terms:
+        for metadata in _keyword_candidates(collection, terms):
+            parent_id = str(metadata.get("parent_id", ""))
+            if parent_id not in best:
+                best[parent_id] = _to_retrieved(metadata, 0.0, "exact")
+
+    # Pass 2: semantic matches, gated by distance.
     for metadata, distance in zip(metadatas, distances, strict=False):
         if distance > config.MAX_DISTANCE:
             continue
         parent_id = str(metadata.get("parent_id", ""))
         existing = best.get(parent_id)
-        if existing is not None and existing.distance <= distance:
+        if existing is not None and (
+            existing.match_type == "exact" or existing.distance <= distance
+        ):
             continue
-        best[parent_id] = Retrieved(
-            text=str(metadata.get("parent_text", "")),
-            source=str(metadata.get("source", "")),
-            page=int(metadata.get("page", 0)),
-            section=str(metadata.get("section", "")),
-            content_type=str(metadata.get("content_type", "")),
-            distance=float(distance),
-        )
+        best[parent_id] = _to_retrieved(metadata, float(distance), "semantic")
 
-    ranked = sorted(best.values(), key=lambda r: r.distance)
+    # Exact matches first, then semantic by distance.
+    ranked = sorted(
+        best.values(), key=lambda r: (0 if r.match_type == "exact" else 1, r.distance)
+    )
+
+    # Second guard: if the question names an entity the corpus never mentions,
+    # a close distance is not an answer. An exact identifier match is exempt --
+    # that is already proof the right chunk was found.
+    entities = named_entities(cleaned)
+    has_exact = any(r.match_type == "exact" for r in ranked)
+    if entities and ranked and not has_exact and not _mentions_all(entities, ranked):
+        logger.info(
+            "Refusing: question names %s, which no retrieved section mentions",
+            entities,
+        )
+        return []
     logger.info(
-        "%s children -> %s unique parents (kept %s)",
+        "%s semantic + %s literal -> %s unique parents (kept %s)",
         len(metadatas),
+        sum(1 for r in best.values() if r.match_type == "exact"),
         len(best),
         min(len(ranked), config.TOP_K_PARENTS),
     )

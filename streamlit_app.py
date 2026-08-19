@@ -146,12 +146,17 @@ if asked and question.strip():
                     label += "  ·  table"
                 elif source["content_type"] == "image_only":
                     label += "  ·  unreadable page"
+                if source.get("match_type") == "exact":
+                    label += "  ·  exact match"
                 with st.expander(label):
-                    st.caption(
-                        "relevance distance {:.3f} (lower is closer)".format(
-                            source["distance"]
+                    if source.get("match_type") == "exact":
+                        st.caption("found by exact identifier match, not by similarity")
+                    else:
+                        st.caption(
+                            "relevance distance {:.3f} (lower is closer)".format(
+                                source["distance"]
+                            )
                         )
-                    )
                     st.text(source["text"][:4000])
         elif not notice and answer.startswith("I don't know"):
             st.caption("Nothing in the library was close enough to this question.")

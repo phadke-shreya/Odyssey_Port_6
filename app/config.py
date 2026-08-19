@@ -88,11 +88,23 @@ TOP_K_PARENTS = 4  # unique parents actually sent to the model
 #   all-MiniLM-L6-v2   in-scope 0.22-0.34   out-of-scope 0.6+
 #   nomic-embed-text   in-scope 0.19-0.25   out-of-scope 0.43+
 #
-# Re-measure after changing EMBEDDING_MODEL: ask ~8 questions you know the
-# documents answer and ~8 you know they do not, and put the threshold in the
-# gap between the two groups.
+# Re-measure after changing EMBEDDING_MODEL with: python eval/run_eval.py --sweep
+# It prints in-scope recall against out-of-scope refusal for a range of values.
+#
+# Measured for nomic-embed-text on this corpus (23 in-scope, 10 out-of-scope):
+#
+#   threshold   in-scope kept   out-of-scope refused
+#     0.30            91%              100%
+#     0.35           100%              100%   <- window opens
+#     0.40           100%              100%   <- window closes
+#     0.45           100%               80%
+#     0.55           100%               10%
+#
+# The safe window is [0.35, 0.40], so 0.375 sits in the middle of it with margin
+# on both sides. Picking an edge value would leave no room for a document set
+# slightly harder than this one.
 _MAX_DISTANCE_LOCAL = 0.55
-_MAX_DISTANCE_HOSTED = 0.35
+_MAX_DISTANCE_HOSTED = 0.375
 MAX_DISTANCE = (
     _MAX_DISTANCE_HOSTED if EMBEDDING_PROVIDER == "openai" else _MAX_DISTANCE_LOCAL
 )
