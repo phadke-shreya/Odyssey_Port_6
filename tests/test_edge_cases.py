@@ -115,8 +115,12 @@ def test_same_question_returns_the_same_sources() -> None:
     first = vector_store.search(question)
     second = vector_store.search(question)
 
-    assert [s.citation() for s in first] == [s.citation() for s in second]
-    assert [s.content_type for s in first] == [s.content_type for s in second]
+    assert [source.citation() for source in first] == [
+        source.citation() for source in second
+    ]
+    assert [source.content_type for source in first] == [
+        source.content_type for source in second
+    ]
     for one, two in zip(first, second, strict=True):
         assert one.distance == pytest.approx(two.distance, abs=1e-3)
 

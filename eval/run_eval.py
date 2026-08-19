@@ -56,7 +56,9 @@ def validate_ground_truth(cases: list[dict]) -> list[str]:
                 continue
             blocks = parse_pdf(path)
             text_by_doc[doc] = "\n".join(
-                b.text for b in blocks if b.content_type is not ContentType.IMAGE_ONLY
+                block.text
+                for block in blocks
+                if block.content_type is not ContentType.IMAGE_ONLY
             ).lower()
 
         phrase = case["must_contain"].lower()
@@ -84,7 +86,7 @@ def measure_in_scope(cases: list[dict]) -> dict:
             reciprocal_ranks.append(0.0)
             continue
 
-        docs = [h.source for h in hits]
+        docs = [hit.source for hit in hits]
         expected = case["expected_doc"]
 
         if docs[0] == expected:
@@ -97,7 +99,7 @@ def measure_in_scope(cases: list[dict]) -> dict:
             failures.append((case["q"], "wrong doc: got {}".format(docs[0])))
 
         phrase = case["must_contain"].lower()
-        if any(phrase in h.text.lower() for h in hits):
+        if any(phrase in hit.text.lower() for hit in hits):
             grounded += 1
 
     total = len(cases)
@@ -149,8 +151,10 @@ def sweep_threshold(cases: list[dict], out_of_scope: list[str]) -> None:
     try:
         for threshold in [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]:
             config.MAX_DISTANCE = threshold
-            kept = sum(1 for c in cases if vector_store.search(c["q"]))
-            refused = sum(1 for q in out_of_scope if not vector_store.search(q))
+            kept = sum(1 for cas in cases if vector_store.search(cas["q"]))
+            refused = sum(
+                1 for question in out_of_scope if not vector_store.search(question)
+            )
             marker = "  <- current" if abs(threshold - original) < 1e-9 else ""
             print(
                 "  {:>9.2f} {:>13.0f}% {:>15.0f}%{}".format(

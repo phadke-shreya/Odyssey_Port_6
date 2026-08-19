@@ -26,7 +26,7 @@ from pdfplumber.page import Page
 from pdfplumber.table import Table
 
 from app import config, ocr
-from app.chunker import Block, ContentType
+from app.models import Block, ContentType
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def is_real_table(rows: list[list[str | None]]) -> bool:
         return False
     # At least two rows must actually populate two or more columns, otherwise
     # it is a single column of text that happens to sit inside a border.
-    populated = sum(1 for row in cleaned if sum(1 for c in row if c) >= 2)
+    populated = sum(1 for row in cleaned if sum(1 for value in row if value) >= 2)
     return populated >= 2
 
 
@@ -148,7 +148,7 @@ def _text_outside_tables(page: Page, tables: list[Table]) -> str:
     if not tables:
         return page.extract_text() or ""
 
-    boxes = [t.bbox for t in tables]
+    boxes = [table.bbox for table in tables]
 
     def keep(obj: dict) -> bool:
         """Whether one pdfplumber object should be kept in the filtered page."""
@@ -244,9 +244,9 @@ def parse_pdf(path: Path) -> list[Block]:
 
     with opened as pdf:
         for page in pdf.pages:
-            found = page.find_tables()
+            tables = page.find_tables()
 
-            for table in found:
+            for table in tables:
                 try:
                     rows = table.extract()
                     if not is_real_table(rows):
@@ -267,7 +267,7 @@ def parse_pdf(path: Path) -> list[Block]:
                 )
 
             try:
-                body = _text_outside_tables(page, found)
+                body = _text_outside_tables(page, tables)
             except Exception:  # noqa: BLE001 - a damaged page must not kill the file
                 logger.warning(
                     "Could not read text on page %s of %s", page.page_number, source
@@ -276,7 +276,7 @@ def parse_pdf(path: Path) -> list[Block]:
             raw_texts.append(body)
 
             # An image-only page is one with almost no text AND no table.
-            if len(body.strip()) < config.MIN_CHARS_FOR_TEXT_PAGE and not found:
+            if len(body.strip()) < config.MIN_CHARS_FOR_TEXT_PAGE and not tables:
                 # Try OCR before declaring it unreadable. Only these pages are
                 # OCR'd, so a long document with one scan pays for one page.
                 result = ocr.ocr_page(page)
@@ -335,7 +335,7 @@ def parse_pdf(path: Path) -> list[Block]:
     logger.info(
         "%s: %s prose, %s tables, %s OCR pages, %s unreadable pages",
         source,
-        sum(1 for b in blocks if b.content_type is ContentType.PROSE),
+        sum(1 for block in blocks if block.content_type is ContentType.PROSE),
         len(table_rows),
         len(ocr_pages),
         len(image_pages),

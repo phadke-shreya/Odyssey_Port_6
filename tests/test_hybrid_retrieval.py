@@ -84,7 +84,7 @@ def test_identifier_questions_retrieve_the_identifier(question: str) -> None:
     assert hits, "no results for {}".format(question)
     term = identifier_terms(question)[-1]
     assert any(
-        term.lower() in h.text.lower() for h in hits
+        term.lower() in hit.text.lower() for hit in hits
     ), "retrieved nothing containing {}".format(term)
 
 
@@ -96,7 +96,7 @@ def test_exact_matches_are_labelled_and_ranked_first() -> None:
     assert hits
     assert hits[0].match_type == "exact"
     # Semantic hits, if any, come after.
-    kinds = [h.match_type for h in hits]
+    kinds = [hit.match_type for hit in hits]
     assert kinds == sorted(kinds, key=lambda k: 0 if k == "exact" else 1)
 
 
@@ -182,4 +182,4 @@ def test_question_naming_a_present_entity_still_works() -> None:
     hits = vector_store.search("What does the EAP provide?")
 
     assert hits, "the guard blocked an entity that is in the corpus"
-    assert any("eap" in h.text.lower() for h in hits)
+    assert any("eap" in hit.text.lower() for hit in hits)

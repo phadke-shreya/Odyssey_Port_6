@@ -6,9 +6,18 @@ numbers on. For the concepts behind it, read [EXPLAINER.md](EXPLAINER.md) first.
 **Reading order matters** — each file depends on the one before it:
 
 ```
-config.py  ->  chunker.py  ->  pdf_parser.py  ->  vector_store.py
-           ->  rag_chain.py  ->  main.py  ->  streamlit_app.py
+models.py + config.py     (depend on nothing)
+      |
+      v
+chunker.py   pdf_parser.py   vector_store.py   rag_chain.py
+      |
+      v
+main.py  ->  streamlit_app.py
 ```
+
+`models.py` and `config.py` sit at the bottom and import nothing from `app`. Every
+behavioural module depends only on those, never on each other, and `main.py`
+composes them. `tests/test_architecture.py` enforces this.
 
 `ocr.py` is used by `pdf_parser.py`; `eval/run_eval.py` sits outside that chain: it imports the app and measures
 retrieval quality against `eval/questions.json`. Run it after any change that
@@ -18,6 +27,34 @@ could affect retrieval.
 
 1. **No f-strings** — `"{}".format(x)` throughout, for consistency.
 2. **Never `print()`** — always `logger`, so output has a level and can be filtered.
+
+---
+
+# `app/models.py` — the data types
+
+**Why this file exists:** so dependencies point one way. `ContentType`, `Block`,
+`Chunk`, `Retrieved` and `Answer` live here rather than inside whichever module
+needed them first.
+
+That is not tidiness for its own sake. When `Retrieved` lived in `vector_store`,
+`import app.rag_chain` loaded **chromadb** -- even though `rag_chain` never touches
+the database, and CLAUDE.md section 12 says it must not know Chroma exists. The
+same shape made `pdf_parser` (which produces `Block`) depend on `chunker` (which
+consumes it): the producer importing its own consumer.
+
+Nothing failed, no test broke, and the coupling was invisible until someone
+checked. `tests/test_architecture.py` now checks it on every run.
+
+| Type | Role |
+|---|---|
+| `ContentType` | prose / table / image_only / ocr — drives which strategy applies |
+| `Block` | one piece of a parsed page, before chunking |
+| `Chunk` | a child: the unit that gets embedded, carrying its parent's full text |
+| `Retrieved` | one parent section retrieved for a question, with `citation()` |
+| `Answer` | text plus sources, never separated |
+
+`Retrieved.citation()` appends `OCR - may contain errors` when the content came
+from OCR, because a machine's reading of a picture is not the document's own text.
 
 ---
 

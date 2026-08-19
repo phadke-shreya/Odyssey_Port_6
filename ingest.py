@@ -60,7 +60,9 @@ def main() -> int:
             chunks = chunk_document(blocks, path.name)
             stored = vector_store.ingest(chunks)
             total_chunks += stored
-            scans = sum(1 for b in blocks if b.content_type is ContentType.IMAGE_ONLY)
+            scans = sum(
+                1 for block in blocks if block.content_type is ContentType.IMAGE_ONLY
+            )
             note = " ({} page(s) unreadable)".format(scans) if scans else ""
             logger.info("%s: stored %s chunks%s", path.name, stored, note)
         except Exception as error:  # noqa: BLE001 - one bad PDF must not stop the rest

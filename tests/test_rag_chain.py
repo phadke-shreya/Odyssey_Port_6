@@ -3,14 +3,13 @@
 Both behaviours here were real defects seen in live output, not hypotheticals.
 """
 
+from app.models import Answer, Retrieved
 from app.rag_chain import (
     DONT_KNOW,
     PROMPT_TEMPLATE,
-    Answer,
     _strip_contradictory_hedge,
     format_context,
 )
-from app.vector_store import Retrieved
 
 
 def _section(text: str, page: int = 55) -> Retrieved:

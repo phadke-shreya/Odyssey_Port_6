@@ -13,6 +13,7 @@ simplest thing that works" -- are deliberately out of scope.
 import ast
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,14 +32,14 @@ CLI_FILES = frozenset({"ingest.py", "run_eval.py", "check_conventions.py"})
 ALLOWED_SHORT_NAMES = frozenset({"i", "_"})
 
 
+@dataclass
 class Finding:
     """One convention violation, ready to print."""
 
-    def __init__(self, rule: str, path: Path, line: int, message: str) -> None:
-        self.rule = rule
-        self.path = path
-        self.line = line
-        self.message = message
+    rule: str
+    path: Path
+    line: int
+    message: str
 
     def __str__(self) -> str:
         return "  {}:{}  {}".format(
@@ -171,6 +172,33 @@ def check_consistency(tree: ast.AST, path: Path) -> list[Finding]:
     return found
 
 
+def check_variable_names(tree: ast.AST, path: Path) -> list[Finding]:
+    """Section 5: no single-letter names, in loops and comprehensions too.
+
+    Added after a review found 21 of these that the first version of this checker
+    missed, because it only inspected function parameters.
+    """
+    found: list[Finding] = []
+    targets: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            for generator in node.generators:
+                if isinstance(generator.target, ast.Name):
+                    targets.append((node.lineno, generator.target.id))
+        elif isinstance(node, ast.For) and isinstance(node.target, ast.Name):
+            targets.append((node.lineno, node.target.id))
+    for line, name in targets:
+        if len(name) == 1 and name not in ALLOWED_SHORT_NAMES:
+            found.append(
+                Finding(
+                    "5", path, line, "single-letter loop variable '{}'".format(name)
+                )
+            )
+    return found
+
+
 def check_signatures(tree: ast.AST, path: Path) -> list[Finding]:
     """Sections 7 and 13: type hints everywhere, docstrings on public functions."""
     found: list[Finding] = []
@@ -252,6 +280,7 @@ def main() -> int:
         findings.extend(check_banned_constructs(tree, path))
         findings.extend(check_logging(tree, path))
         findings.extend(check_consistency(tree, path))
+        findings.extend(check_variable_names(tree, path))
         findings.extend(check_signatures(tree, path))
         findings.extend(check_comments(source, path))
 

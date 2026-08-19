@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.chunker import ContentType
+from app.models import ContentType
 from app.pdf_parser import is_real_table, parse_pdf, table_to_markdown
 
 DOCS = Path(__file__).resolve().parent.parent / "documents"
@@ -104,7 +104,7 @@ def test_scanned_page_is_never_silently_dropped() -> None:
     blocks = parse_pdf(SCAN)
 
     assert blocks, "the scanned page produced nothing at all"
-    kinds = {b.content_type for b in blocks}
+    kinds = {block.content_type for block in blocks}
     assert kinds & {ContentType.OCR, ContentType.IMAGE_ONLY}, kinds
 
     block = blocks[0]
@@ -120,8 +120,8 @@ def test_scanned_page_is_never_silently_dropped() -> None:
 def test_real_pdf_yields_prose_and_tables() -> None:
     blocks = parse_pdf(WITH_TABLES)
 
-    prose = [b for b in blocks if b.content_type is ContentType.PROSE]
-    tables = [b for b in blocks if b.content_type is ContentType.TABLE]
+    prose = [block for block in blocks if block.content_type is ContentType.PROSE]
+    tables = [block for block in blocks if block.content_type is ContentType.TABLE]
     assert len(prose) > 5
     assert len(tables) >= 1
 
@@ -131,7 +131,7 @@ def test_every_table_chunk_starts_with_a_caption() -> None:
     """The caption must be line 1, so it is always inside the embedding window."""
     blocks = parse_pdf(WITH_TABLES)
 
-    tables = [b for b in blocks if b.content_type is ContentType.TABLE]
+    tables = [block for block in blocks if block.content_type is ContentType.TABLE]
     for block in tables:
         first_line = block.text.split("\n")[0]
         assert first_line.startswith("Table from ")
@@ -150,17 +150,19 @@ def test_table_text_is_not_duplicated_in_prose() -> None:
     blocks = parse_pdf(WITH_TABLES)
 
     prose_by_page = {
-        b.page: b.text for b in blocks if b.content_type is ContentType.PROSE
+        block.page: block.text
+        for block in blocks
+        if block.content_type is ContentType.PROSE
     }
-    tables = [b for b in blocks if b.content_type is ContentType.TABLE]
+    tables = [block for block in blocks if block.content_type is ContentType.TABLE]
     assert tables, "no tables found to check"
 
     leaks = []
     for block in tables:
         same_page_prose = prose_by_page.get(block.page, "")
-        rows = [r for r in block.text.split("\n") if r.startswith("|")]
+        rows = [row for row in block.text.split("\n") if row.startswith("|")]
         for row in rows[2:]:
-            cells = [c.strip() for c in row.strip("|").split("|")]
+            cells = [item.strip() for item in row.strip("|").split("|")]
             for cell in cells:
                 if len(cell) > 25 and cell in same_page_prose:
                     leaks.append((block.page, cell[:40]))

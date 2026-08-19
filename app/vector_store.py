@@ -17,7 +17,6 @@ Two things here carry most of the design weight:
 import logging
 import re
 import shutil
-from dataclasses import dataclass
 
 import chromadb
 from chromadb.api.models.Collection import Collection
@@ -25,7 +24,7 @@ from chromadb.api.types import EmbeddingFunction
 from chromadb.utils import embedding_functions
 
 from app import config
-from app.chunker import Chunk
+from app.models import Chunk, Retrieved
 
 logger = logging.getLogger(__name__)
 
@@ -44,35 +43,10 @@ class EmbeddingModelMismatch(RuntimeError):
     """Raised when the stored vectors were built by a different model."""
 
 
-@dataclass
-class Retrieved:
-    """One parent section retrieved for a question, ready to cite."""
-
-    text: str
-    source: str
-    page: int
-    section: str
-    content_type: str
-    distance: float
-    match_type: str = "semantic"
-
-    def citation(self) -> str:
-        """Format this source the way it is shown to the user."""
-        parts = [self.source, "page {}".format(self.page)]
-        if self.section:
-            parts.append(self.section)
-        # OCR text is a machine's reading of a picture, not the document's own
-        # text layer. Saying so is the difference between a citation the reader
-        # can trust and one they cannot.
-        if self.content_type == "ocr":
-            parts.append("OCR - may contain errors")
-        return " | ".join(parts)
-
-
 def _embedding_function() -> EmbeddingFunction:
     """Build the embedding function named by the config.
 
-    The OpenAI path honours OPENAI_BASE_URL, so a company gateway needs no code
+    The OpenAI path honours EMBEDDING_BASE_URL, so a company gateway needs no code
     change -- only that one environment variable.
     """
     if config.EMBEDDING_PROVIDER == "openai":
@@ -237,9 +211,9 @@ def identifier_terms(question: str) -> list[str]:
         if not token:
             continue
         candidate = token.group(0).strip(".,;:")
-        if len(candidate) < 3 or not any(c.isdigit() for c in candidate):
+        if len(candidate) < 3 or not any(item.isdigit() for item in candidate):
             continue
-        has_letters = any(c.isalpha() for c in candidate)
+        has_letters = any(item.isalpha() for item in candidate)
         if not (_STRUCTURED.search(candidate) or has_letters):
             continue  # a bare number is not an identifier
 
@@ -315,7 +289,7 @@ def named_entities(question: str) -> list[str]:
 
 def _mentions_all(entities: list[str], results: list[Retrieved]) -> bool:
     """Whether at least one retrieved section mentions each named entity."""
-    haystack = " ".join(r.text for r in results).lower()
+    haystack = " ".join(result.text for result in results).lower()
     return all(entity.lower() in haystack for entity in entities)
 
 
@@ -401,7 +375,7 @@ def search(question: str) -> list[Retrieved]:
     # a close distance is not an answer. An exact identifier match is exempt --
     # that is already proof the right chunk was found.
     entities = named_entities(cleaned)
-    has_exact = any(r.match_type == "exact" for r in ranked)
+    has_exact = any(result.match_type == "exact" for result in ranked)
     if entities and ranked and not has_exact and not _mentions_all(entities, ranked):
         logger.info(
             "Refusing: question names %s, which no retrieved section mentions",
@@ -411,7 +385,7 @@ def search(question: str) -> list[Retrieved]:
     logger.info(
         "%s semantic + %s literal -> %s unique parents (kept %s)",
         len(metadatas),
-        sum(1 for r in best.values() if r.match_type == "exact"),
+        sum(1 for result in best.values() if result.match_type == "exact"),
         len(best),
         min(len(ranked), config.TOP_K_PARENTS),
     )

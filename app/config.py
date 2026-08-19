@@ -109,6 +109,13 @@ OCR_DPI = int(os.getenv("OCR_DPI", "300"))
 OCR_MIN_CONFIDENCE = float(os.getenv("OCR_MIN_CONFIDENCE", "55"))
 OCR_MIN_CHARS = int(os.getenv("OCR_MIN_CHARS", "40"))
 
+# Separately: below this an individual OCR paragraph is a fragment rather than a
+# fact, so it is joined to its neighbour instead of becoming a chunk nobody can
+# retrieve. Same value as OCR_MIN_CHARS today but a different question -- one is
+# "is this page worth indexing", this is "is this line worth its own chunk" -- so
+# they are deliberately not shared.
+OCR_MIN_CHILD_CHARS = int(os.getenv("OCR_MIN_CHILD_CHARS", "40"))
+
 # --- Retrieval -----------------------------------------------------------
 TOP_K_CHILDREN = 8  # fetched, then de-duplicated by parent
 TOP_K_PARENTS = 4  # unique parents actually sent to the model
@@ -132,11 +139,11 @@ TOP_K_PARENTS = 4  # unique parents actually sent to the model
 # Each value below sits inside its measured window, not at an edge. Re-measure
 # after changing EMBEDDING_MODEL -- and if a model is missing here it falls back
 # to a deliberately permissive default, which favours answering over refusing.
+# Only measured models are listed: a guessed number that looks measured is worse
+# than no entry, because the fallback at least announces itself as a default.
 _MAX_DISTANCE_BY_MODEL = {
     "nomic-embed-text": 0.375,
     "text-embedding-3-small": 0.52,
-    # Same family and geometry as -small, but not separately measured here.
-    "text-embedding-3-large": 0.52,
     # ChromaDB's local default.
     "all-MiniLM-L6-v2": 0.55,
 }

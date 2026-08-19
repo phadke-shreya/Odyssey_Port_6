@@ -14,11 +14,10 @@ Two rules are enforced here rather than hoped for:
 
 import logging
 import re
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from app import config
-from app.vector_store import Retrieved
+from app.models import Answer, Retrieved
 
 if TYPE_CHECKING:  # imported lazily at runtime, see _build_llm
     from langchain_openai import ChatOpenAI
@@ -77,25 +76,6 @@ Sources:
 Question: {question}
 
 Answer:"""
-
-
-@dataclass
-class Answer:
-    """An answer and the sources it came from. These are never separated."""
-
-    text: str
-    sources: list[Retrieved] = field(default_factory=list)
-    generated: bool = True
-    notice: str = ""
-
-    @property
-    def is_dont_know(self) -> bool:
-        """Whether this is a refusal rather than an answer.
-
-        A property so callers ask a question instead of string-matching the text
-        themselves, which would drift from DONT_KNOW the moment it is reworded.
-        """
-        return self.text.strip().startswith("I don't know")
 
 
 class GenerationUnavailable(RuntimeError):

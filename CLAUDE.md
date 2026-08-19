@@ -330,6 +330,8 @@ Abstract SOLID is useless. Here it is in terms of this repo.
 
 | Module | Does | Must NOT |
 |---|---|---|
+| `models.py` | hold the data types passed between modules | import anything from `app` |
+| `config.py` | hold every tunable setting | import anything from `app` |
 | `pdf_parser.py` | read + clean + classify | chunk, embed |
 | `chunker.py` | text → parent/child chunks | touch PDFs or Chroma |
 | `vector_store.py` | embed, store, retrieve, expand to parents | build prompts or call the LLM |
@@ -338,6 +340,12 @@ Abstract SOLID is useless. Here it is in terms of this repo.
 | `streamlit_app.py` | display | contain retrieval logic |
 
 A function named `parse_and_chunk_and_embed` violates this. Split it.
+
+**These boundaries are tested**, in `tests/test_architecture.py`: that `rag_chain`
+does not load `chromadb`, that only `vector_store` imports it, that the parser does
+not depend on the chunker, and that there are no import cycles. They are tested
+because the boundary was silently broken once -- a data type living in the wrong
+module made `import app.rag_chain` pull in the database driver, and nothing failed.
 
 **O — Open/closed.** Adding a new content type (say code blocks) should mean **adding** a handler, not editing five functions. Dispatch on `content_type`; don't scatter `if is_table` checks through the pipeline.
 

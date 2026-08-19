@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from app import config, ocr
-from app.chunker import ContentType, chunk_document
+from app.chunker import chunk_document
+from app.models import ContentType
 from app.ocr import OcrResult
 from app.pdf_parser import parse_pdf
 
@@ -91,7 +92,7 @@ def test_page_is_reported_unreadable_when_ocr_is_off(
 
     blocks = parse_pdf(SCAN)
 
-    kinds = {b.content_type for b in blocks}
+    kinds = {block.content_type for block in blocks}
     assert ContentType.IMAGE_ONLY in kinds
     assert ContentType.OCR not in kinds
 
@@ -105,7 +106,7 @@ def test_scanned_page_becomes_searchable_text() -> None:
     """The whole point: a page with no text layer becomes readable content."""
     blocks = parse_pdf(SCAN)
 
-    ocr_blocks = [b for b in blocks if b.content_type is ContentType.OCR]
+    ocr_blocks = [block for block in blocks if block.content_type is ContentType.OCR]
     assert ocr_blocks, "OCR produced nothing for a scanned page"
 
     text = ocr_blocks[0].text.lower()
@@ -124,13 +125,13 @@ def test_ocr_text_is_chunked_and_labelled() -> None:
     chunks = chunk_document(blocks, SCAN.name)
 
     assert chunks
-    assert all(c.content_type == "ocr" for c in chunks)
-    assert all(c.parent_text for c in chunks)
+    assert all(chunk.content_type == "ocr" for chunk in chunks)
+    assert all(chunk.parent_text for chunk in chunks)
 
 
 def test_citation_warns_when_text_came_from_ocr() -> None:
     """A reader must be able to tell OCR from the document's own text."""
-    from app.vector_store import Retrieved
+    from app.models import Retrieved
 
     ocr_source = Retrieved(
         text="...",
@@ -175,7 +176,9 @@ def test_ocr_text_is_split_on_its_own_paragraph_breaks() -> None:
 
     assert len(children) > 1, "unrelated facts were packed into one child"
     # The laptop fact must be retrievable on its own, not diluted.
-    assert any("laptops" in c and "Bangalore" not in c for c in children), children
+    assert any(
+        "laptops" in item and "Bangalore" not in item for item in children
+    ), children
 
 
 def test_short_ocr_fragments_are_joined_not_left_alone() -> None:
@@ -186,7 +189,7 @@ def test_short_ocr_fragments_are_joined_not_left_alone() -> None:
 
     children = _children_for_ocr(text)
 
-    assert all(len(c) >= 20 for c in children), children
+    assert all(len(item) >= 20 for item in children), children
 
 
 def test_a_long_ocr_paragraph_is_still_size_limited() -> None:
@@ -197,7 +200,7 @@ def test_a_long_ocr_paragraph_is_still_size_limited() -> None:
     children = _children_for_ocr(text)
 
     assert len(children) > 1
-    assert all(len(c) <= config.CHILD_CHUNK_SIZE + 100 for c in children)
+    assert all(len(item) <= config.CHILD_CHUNK_SIZE + 100 for item in children)
 
 
 def test_ocr_children_keep_the_whole_page_as_parent() -> None:
@@ -214,8 +217,8 @@ def test_ocr_children_keep_the_whole_page_as_parent() -> None:
     chunks = chunk_document(blocks, "notice.pdf")
 
     assert len(chunks) > 1
-    assert len({c.parent_id for c in chunks}) == 1, "should share one parent"
-    assert all(c.parent_text == text for c in chunks)
+    assert len({chunk.parent_id for chunk in chunks}) == 1, "should share one parent"
+    assert all(chunk.parent_text == text for chunk in chunks)
 
 
 def test_ocr_layout_reconstruction_preserves_lines() -> None:

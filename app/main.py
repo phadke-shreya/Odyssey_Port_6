@@ -91,16 +91,16 @@ def ask(request: AskRequest) -> AskResponse:
         answer=result.text,
         sources=[
             SourceOut(
-                citation=s.citation(),
-                source=s.source,
-                page=s.page,
-                section=s.section,
-                content_type=s.content_type,
-                distance=round(s.distance, 4),
-                match_type=s.match_type,
-                text=s.text,
+                citation=source.citation(),
+                source=source.source,
+                page=source.page,
+                section=source.section,
+                content_type=source.content_type,
+                distance=round(source.distance, 4),
+                match_type=source.match_type,
+                text=source.text,
             )
-            for s in result.sources
+            for source in result.sources
         ],
         generated=result.generated,
         notice=result.notice,
@@ -147,7 +147,9 @@ def upload(file: Annotated[UploadFile, File()]) -> dict[str, object]:
                 "password protected.",
             }
 
-    unreadable = sum(1 for b in blocks if b.content_type is ContentType.IMAGE_ONLY)
+    unreadable = sum(
+        1 for block in blocks if block.content_type is ContentType.IMAGE_ONLY
+    )
     return {
         "ok": True,
         "document": safe_name,

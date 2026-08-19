@@ -13,52 +13,13 @@ See plan.md section 4 for the full reasoning.
 
 import logging
 import re
-from dataclasses import dataclass
-from enum import StrEnum
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app import config
+from app.models import Block, Chunk, ContentType
 
 logger = logging.getLogger(__name__)
-
-
-class ContentType(StrEnum):
-    """What kind of content a block holds. Drives which strategy applies."""
-
-    PROSE = "prose"
-    TABLE = "table"
-    IMAGE_ONLY = "image_only"
-    # Text recovered from a picture by OCR. Chunked like prose, but labelled
-    # separately so citations can warn that it may contain errors.
-    OCR = "ocr"
-
-
-@dataclass
-class Block:
-    """One piece of a parsed page, before any chunking has happened."""
-
-    text: str
-    page: int
-    content_type: ContentType
-
-
-@dataclass
-class Chunk:
-    """A child chunk: the unit that gets embedded and stored in ChromaDB.
-
-    It carries its parent's full text so that retrieval can expand a matched
-    child back up to the whole section without a second lookup -- and so the
-    parent survives a restart, since Chroma persists metadata to disk.
-    """
-
-    text: str
-    parent_id: str
-    parent_text: str
-    source: str
-    page: int
-    section: str
-    content_type: str
 
 
 # Heading detection is deliberately HIGH PRECISION. Real documents are full of
@@ -112,9 +73,6 @@ _SMALL_WORDS = frozenset(
 
 _WORDS = re.compile(r"[A-Za-z][A-Za-z'\u2019-]*")
 
-# Below this an OCR paragraph is a fragment, not a fact, so it is joined to its
-# neighbour instead of becoming a chunk nobody can retrieve.
-_MIN_OCR_CHILD_CHARS = 40
 
 # Dot leaders ". . . . 14" mark a table-of-contents entry. The same heading
 # appears again in the body, so indexing the TOC version just adds a duplicate
@@ -183,10 +141,12 @@ def is_title_case(text: str) -> bool:
     capitalise their significant words; sentences do not.
     """
     words = _WORDS.findall(text)
-    significant = [w for w in words if len(w) >= 3 and w.lower() not in _SMALL_WORDS]
+    significant = [
+        word for word in words if len(word) >= 3 and word.lower() not in _SMALL_WORDS
+    ]
     if not significant:
         return False
-    capitalised = sum(1 for w in significant if w[0].isupper())
+    capitalised = sum(1 for word in significant if word[0].isupper())
     return capitalised / len(significant) >= 0.6
 
 
@@ -233,16 +193,16 @@ def looks_like_heading(line: str) -> bool:
         remainder = keyword.group(3).strip(" :-\u2013\u2014")
         return not remainder or is_title_case(remainder)
 
-    letters = [c for c in stripped if c.isalpha()]
-    if not (len(letters) >= 3 and all(c.isupper() for c in letters)):
+    letters = [character for character in stripped if character.isalpha()]
+    if not (len(letters) >= 3 and all(character.isupper() for character in letters)):
         return False
     # Reject generic part-labels like "DISCUSSION" that name no topic. Single
     # letters and Roman numerals are ignored, so "STEP I" is judged on the word
     # "STEP" alone and correctly rejected.
     found = [
-        w
-        for w in _WORDS.findall(stripped.upper())
-        if len(w) > 1 and not _ROMAN_NUMERAL.fullmatch(w)
+        word
+        for word in _WORDS.findall(stripped.upper())
+        if len(word) > 1 and not _ROMAN_NUMERAL.fullmatch(word)
     ]
     if not found or set(found).issubset(_GENERIC_LABELS):
         return False
@@ -330,7 +290,7 @@ def _emit_parent(
     if batch:
         parents.append(("\n".join(batch).strip(), batch_page, section))
 
-    parents = [p for p in parents if p[0]]
+    parents = [parent for parent in parents if parent[0]]
 
     # Label the pieces only when there is more than one, so a normal section
     # keeps a clean breadcrumb.
@@ -436,14 +396,14 @@ def _children_for_ocr(text: str) -> list[str]:
     using headings for prose. The parent is still the whole page, so an answer
     keeps full context.
     """
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    paragraphs = [block.strip() for block in text.split("\n\n") if block.strip()]
     children: list[str] = []
     pending = ""
 
     for paragraph in paragraphs:
         # A fragment on its own carries no meaning, so join it to the next one.
         candidate = "{}\n{}".format(pending, paragraph) if pending else paragraph
-        if len(candidate) < _MIN_OCR_CHILD_CHARS:
+        if len(candidate) < config.OCR_MIN_CHILD_CHARS:
             pending = candidate
             continue
         if len(candidate) <= config.CHILD_CHUNK_SIZE:
@@ -490,10 +450,14 @@ def chunk_document(blocks: list[Block], filename: str) -> list[Chunk]:
     # Prose is grouped across blocks so a section can span a page break. OCR text
     # is per page (a scanned page has no reliable heading structure to follow), and
     # tables and placeholders are one chunk each.
-    prose_blocks = [b for b in blocks if b.content_type is ContentType.PROSE]
-    ocr_blocks = [b for b in blocks if b.content_type is ContentType.OCR]
+    prose_blocks = [
+        block for block in blocks if block.content_type is ContentType.PROSE
+    ]
+    ocr_blocks = [block for block in blocks if block.content_type is ContentType.OCR]
     other_blocks = [
-        b for b in blocks if b.content_type not in (ContentType.PROSE, ContentType.OCR)
+        block
+        for block in blocks
+        if block.content_type not in (ContentType.PROSE, ContentType.OCR)
     ]
 
     if prose_blocks:

@@ -54,7 +54,7 @@ def test_table_is_never_split() -> None:
 
     chunks = chunk_document(blocks, "HR_Policy.pdf")
 
-    table_chunks = [c for c in chunks if c.content_type == "table"]
+    table_chunks = [chunk for chunk in chunks if chunk.content_type == "table"]
     assert len(table_chunks) == 1, "table was split into multiple chunks"
 
     chunk = table_chunks[0]
@@ -88,10 +88,10 @@ def test_section_headings_become_breadcrumbs() -> None:
 
     chunks = chunk_document(blocks, "handbook.pdf")
 
-    sections = {c.section for c in chunks if c.section}
-    assert any("Remote Work Policy" in s for s in sections)
+    sections = {chunk.section for chunk in chunks if chunk.section}
+    assert any("Remote Work Policy" in section for section in sections)
     # Nesting must produce a trail, not just the leaf heading.
-    assert any(">" in s for s in sections), sections
+    assert any(">" in section for section in sections), sections
 
 
 def test_unstructured_document_falls_back_to_size_parents() -> None:
@@ -101,7 +101,7 @@ def test_unstructured_document_falls_back_to_size_parents() -> None:
     chunks = chunk_document(blocks, "messy.pdf")
 
     assert chunks, "fallback produced no chunks"
-    assert all(c.section == "" for c in chunks)
+    assert all(chunk.section == "" for chunk in chunks)
 
 
 def test_image_only_page_is_flagged_not_dropped() -> None:
@@ -126,7 +126,7 @@ def test_oversized_section_is_split_and_labelled() -> None:
 
     chunks = chunk_document(blocks, "big.pdf")
 
-    parent_ids = {c.parent_id for c in chunks}
+    parent_ids = {chunk.parent_id for chunk in chunks}
     assert len(parent_ids) > 1, "oversized section was not split"
     for chunk in chunks:
         assert len(chunk.parent_text) <= config.PARENT_MAX_CHARS + 100
@@ -267,8 +267,8 @@ def test_numbered_heading_is_not_nested_under_an_unnumbered_one() -> None:
 
     chunks = chunk_document(blocks, "standard.pdf")
 
-    sections = {c.section for c in chunks if c.section}
-    assert any(s.startswith("03.05.03") for s in sections), sections
+    sections = {chunk.section for chunk in chunks if chunk.section}
+    assert any(section.startswith("03.05.03") for section in sections), sections
     for section in sections:
         assert not section.startswith("SECURITY REQUIREMENTS >"), section
 
@@ -291,14 +291,16 @@ def test_sibling_headings_do_not_nest_under_each_other() -> None:
     )
     blocks = [Block(text=text, page=44, content_type=ContentType.PROSE)]
 
-    sections = {c.section for c in chunk_document(blocks, "standard.pdf")}
+    sections = {item.section for item in chunk_document(blocks, "standard.pdf")}
 
     # A sibling replaces, it does not nest.
     assert not any(
-        s.startswith("3.1. Access Control > 3.5.") for s in sections
+        section.startswith("3.1. Access Control > 3.5.") for section in sections
     ), sections
     # A genuine child still nests under its parent.
-    assert any("3.5. Identification" in s and "3.5.3." in s for s in sections), sections
+    assert any(
+        "3.5. Identification" in section and "3.5.3." in section for section in sections
+    ), sections
 
 
 @pytest.mark.parametrize("line", ["UTC", "AH", "PDF", "IRS"])
