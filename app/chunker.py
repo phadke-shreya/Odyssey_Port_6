@@ -114,6 +114,9 @@ _WORDS = re.compile(r"[A-Za-z][A-Za-z'\u2019-]*")
 # with a page number stuck on the end.
 _DOT_LEADER = re.compile(r"\.\s*\.\s*\.")
 
+# Roman numerals, so "STEP I" and "PART IV" are judged on their word alone.
+_ROMAN_NUMERAL = re.compile(r"[IVXLCDM]+")
+
 # ALL-CAPS words that label a PART of a section rather than naming a topic.
 # Many standards documents repeat these under every requirement, and using them
 # as breadcrumbs produces citations like "page 44 | DISCUSSION", which tells the
@@ -145,6 +148,22 @@ _GENERIC_LABELS = frozenset(
         "DEFINITIONS",
         "REQUIREMENTS",
         "DISCLAIMER",
+        # Seen repeating on every page of a real HR policy manual and a lab
+        # safety SOP. As breadcrumbs they are worse than nothing: every
+        # citation would read "page 7 | POLICY".
+        "STATEMENT",
+        "POLICY",
+        "PROCEDURE",
+        "TABLE",
+        "OF",
+        "FORWARD",
+        "FOREWORD",
+        "STEP",
+        "RESPONSIBILITIES",
+        "APPLICABILITY",
+        "REVISION",
+        "REVISIONS",
+        "APPROVAL",
     }
 )
 
@@ -210,14 +229,20 @@ def looks_like_heading(line: str) -> bool:
     letters = [c for c in stripped if c.isalpha()]
     if not (len(letters) >= 3 and all(c.isupper() for c in letters)):
         return False
-    # Reject generic part-labels like "DISCUSSION" that name no topic.
-    found = _WORDS.findall(stripped.upper())
-    if set(found).issubset(_GENERIC_LABELS):
+    # Reject generic part-labels like "DISCUSSION" that name no topic. Single
+    # letters and Roman numerals are ignored, so "STEP I" is judged on the word
+    # "STEP" alone and correctly rejected.
+    found = [
+        w
+        for w in _WORDS.findall(stripped.upper())
+        if len(w) > 1 and not _ROMAN_NUMERAL.fullmatch(w)
+    ]
+    if not found or set(found).issubset(_GENERIC_LABELS):
         return False
     # A short ALL-CAPS fragment is usually a running header or an acronym
     # ("UTC"), not a section title. Require either several words or one
     # substantial word.
-    return len(found) >= 2 or (len(found) == 1 and len(found[0]) >= 6)
+    return len(found) >= 2 or len(found[0]) >= 6
 
 
 def heading_depth(line: str) -> int:

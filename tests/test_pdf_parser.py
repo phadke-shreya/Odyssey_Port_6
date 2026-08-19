@@ -14,7 +14,7 @@ from app.pdf_parser import is_real_table, parse_pdf, table_to_markdown
 
 DOCS = Path(__file__).resolve().parent.parent / "documents"
 SCAN = DOCS / "scanned_notice_IMAGE_ONLY.pdf"
-WITH_TABLES = DOCS / "p501.pdf"
+WITH_TABLES = DOCS / "Product_Manual_ComputeModule4.pdf"
 
 needs_scan = pytest.mark.skipif(not SCAN.exists(), reason="scan fixture missing")
 needs_tables = pytest.mark.skipif(
