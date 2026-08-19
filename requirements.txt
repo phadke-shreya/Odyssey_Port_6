@@ -1,0 +1,26 @@
+# --- PDF parsing ---
+pdfplumber
+
+# --- Chunking (LangChain) ---
+langchain
+langchain-openai
+langchain-text-splitters
+
+# --- Vector DB ---
+chromadb
+
+# --- API ---
+fastapi
+uvicorn[standard]
+python-multipart
+
+# --- UI ---
+streamlit
+
+# --- Config ---
+python-dotenv
+
+# --- Dev ---
+pytest
+black
+ruff

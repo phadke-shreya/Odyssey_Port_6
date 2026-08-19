@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
+
+# UP032 tells us to replace "{}".format(x) with f-strings. This project
+# deliberately uses .format() everywhere for consistency -- see CLAUDE.md
+# section 5. Disabling the rule rather than sprinkling per-line noqa comments.
+ignore = ["UP032"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
