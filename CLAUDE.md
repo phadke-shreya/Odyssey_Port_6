@@ -198,7 +198,7 @@ When unsure on a one-day build: **extract if it's mechanical, leave it if it's j
 | Returns | One shape per function. Never `dict` on success and `None` on failure — raise instead |
 | Errors | Raise a specific exception; catch at the boundary (§9) |
 | Imports | stdlib → third-party → local, blank line between, alphabetical within |
-| Logging | `logging` module. **Never `print()`** outside `ingest.py` CLI output |
+| Logging | `logging` module. **Never `print()`** except in a command-line tool (`ingest.py`, `eval/run_eval.py`, `tools/`) |
 | Data passing | One dataclass (`Chunk`) end to end — not dicts in some places and objects in others |
 
 **When touching existing code, the surrounding style wins over this table** (§3). Consistency with what's there beats consistency with the rules.
@@ -366,6 +366,22 @@ A function named `parse_and_chunk_and_embed` violates this. Split it.
 
 ---
 
+## 14b. These rules are checked automatically
+
+```bash
+python tools/check_conventions.py
+```
+
+Enforces the mechanical rules above -- banned constructs, `while` loops,
+`range(len())`, `os.path`, stray `print()`, missing type hints, missing docstrings
+on public functions, formatted strings passed to the logger, commented-out code.
+It runs in CI, so a violation fails the build rather than waiting for a reviewer
+to notice.
+
+It deliberately does **not** judge the rules that need a human: whether a comment
+explains *why*, whether something is the simplest thing that works, whether two
+similar blocks will change for the same reason. Those still need review.
+
 ## 15. Before saying "done"
 
 - [ ] It **runs**, and I ran it
@@ -373,6 +389,7 @@ A function named `parse_and_chunk_and_embed` violates this. Split it.
 - [ ] No stray debug `print()`s
 - [ ] No secrets, no keys, nothing sensitive logged
 - [ ] `black` + `ruff` clean
+- [ ] `python tools/check_conventions.py` clean
 - [ ] All five invariants in §11 hold
 - [ ] Type hints and docstrings on new functions
 - [ ] No f-strings, no walrus, no nested comprehensions (§5)

@@ -22,6 +22,7 @@ logger = logging.getLogger("ingest")
 
 
 def main() -> int:
+    """Parse arguments, run the job, and return a process exit code."""
     parser = argparse.ArgumentParser(description="Load PDFs into ChromaDB.")
     parser.add_argument(
         "--reset",

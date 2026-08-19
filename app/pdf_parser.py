@@ -22,6 +22,8 @@ from collections import Counter
 from pathlib import Path
 
 import pdfplumber
+from pdfplumber.page import Page
+from pdfplumber.table import Table
 
 from app import config, ocr
 from app.chunker import Block, ContentType
@@ -46,6 +48,23 @@ def _cell(value: str | None) -> str:
     return " ".join(value.split())
 
 
+def _clean_rows(rows: list[list[str | None]]) -> list[list[str]]:
+    """Normalise table rows and drop the empty ones.
+
+    Extracted because both is_real_table and table_to_markdown need exactly this,
+    and doing it inline required a comprehension inside a comprehension -- banned
+    by CLAUDE.md section 5 because it is unreadable at two levels.
+    """
+    cleaned: list[list[str]] = []
+    for row in rows:
+        if not row:
+            continue
+        normalised = [_cell(value) for value in row]
+        if any(normalised):
+            cleaned.append(normalised)
+    return cleaned
+
+
 def is_real_table(rows: list[list[str | None]]) -> bool:
     """Reject layout boxes that pdfplumber reports as tables.
 
@@ -54,8 +73,7 @@ def is_real_table(rows: list[list[str | None]]) -> bool:
     data tables have at least two columns and at least two rows, so requiring
     that filters out the decoration without losing anything useful.
     """
-    cleaned = [[_cell(c) for c in row] for row in rows if row]
-    cleaned = [row for row in cleaned if any(row)]
+    cleaned = _clean_rows(rows)
     if len(cleaned) < 2:
         return False
     width = max(len(row) for row in cleaned)
@@ -74,8 +92,7 @@ def table_to_markdown(rows: list[list[str | None]]) -> str:
     header. Raw PDF table text collapses into ambiguous whitespace where you can
     no longer tell which number belongs to which column.
     """
-    cleaned = [[_cell(c) for c in row] for row in rows if row]
-    cleaned = [row for row in cleaned if any(row)]
+    cleaned = _clean_rows(rows)
     if not cleaned:
         return ""
 
@@ -90,7 +107,7 @@ def table_to_markdown(rows: list[list[str | None]]) -> str:
     return "\n".join(lines)
 
 
-def _caption_for(page: pdfplumber.page.Page, table, source: str) -> str:
+def _caption_for(page: Page, table: Table, source: str) -> str:
     """Build a one-line description of what a table is about.
 
     A bare grid of numbers has almost nothing for an embedding model to latch
@@ -122,7 +139,7 @@ def _caption_for(page: pdfplumber.page.Page, table, source: str) -> str:
     return base
 
 
-def _text_outside_tables(page: pdfplumber.page.Page, tables: list) -> str:
+def _text_outside_tables(page: Page, tables: list[Table]) -> str:
     """Return the page's text with every table's characters removed.
 
     Without this, each table is indexed twice: once as a clean Markdown table
@@ -134,6 +151,7 @@ def _text_outside_tables(page: pdfplumber.page.Page, tables: list) -> str:
     boxes = [t.bbox for t in tables]
 
     def keep(obj: dict) -> bool:
+        """Whether one pdfplumber object should be kept in the filtered page."""
         if obj.get("object_type") != "char":
             return True
         for x0, top, x1, bottom in boxes:

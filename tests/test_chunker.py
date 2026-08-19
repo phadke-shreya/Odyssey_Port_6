@@ -48,7 +48,7 @@ UNSTRUCTURED_PROSE = (
 )
 
 
-def test_table_is_never_split():
+def test_table_is_never_split() -> None:
     """A table must survive as exactly one chunk, with its headers intact."""
     blocks = [Block(text=TABLE_MARKDOWN, page=4, content_type=ContentType.TABLE)]
 
@@ -66,7 +66,7 @@ def test_table_is_never_split():
     assert chunk.parent_text == chunk.text
 
 
-def test_every_child_resolves_to_its_parent():
+def test_every_child_resolves_to_its_parent() -> None:
     """Small-to-big retrieval only works if each child carries its parent."""
     blocks = [Block(text=SECTIONED_PROSE, page=1, content_type=ContentType.PROSE)]
 
@@ -82,7 +82,7 @@ def test_every_child_resolves_to_its_parent():
         assert len(chunk.parent_text) >= len(chunk.text)
 
 
-def test_section_headings_become_breadcrumbs():
+def test_section_headings_become_breadcrumbs() -> None:
     """Detected headings must reach the chunk metadata, for citations."""
     blocks = [Block(text=SECTIONED_PROSE, page=1, content_type=ContentType.PROSE)]
 
@@ -94,7 +94,7 @@ def test_section_headings_become_breadcrumbs():
     assert any(">" in s for s in sections), sections
 
 
-def test_unstructured_document_falls_back_to_size_parents():
+def test_unstructured_document_falls_back_to_size_parents() -> None:
     """A document with no headings must still chunk, not crash or return zero."""
     blocks = [Block(text=UNSTRUCTURED_PROSE, page=1, content_type=ContentType.PROSE)]
 
@@ -104,7 +104,7 @@ def test_unstructured_document_falls_back_to_size_parents():
     assert all(c.section == "" for c in chunks)
 
 
-def test_image_only_page_is_flagged_not_dropped():
+def test_image_only_page_is_flagged_not_dropped() -> None:
     """A page with no text must leave a visible trace, never vanish silently."""
     placeholder = (
         "Page 7 of manual.pdf appears to be an image or scanned page "
@@ -119,7 +119,7 @@ def test_image_only_page_is_flagged_not_dropped():
     assert chunks[0].page == 7
 
 
-def test_oversized_section_is_split_and_labelled():
+def test_oversized_section_is_split_and_labelled() -> None:
     """A huge section must be capped, and say which part it is."""
     huge = "5.2 Remote Work Policy\n" + ("Filler sentence here. " * 400)
     blocks = [Block(text=huge, page=2, content_type=ContentType.PROSE)]
@@ -143,7 +143,7 @@ def test_oversized_section_is_split_and_labelled():
         "WORKPLACE SAFETY",
     ],
 )
-def test_recognises_real_headings(line):
+def test_recognises_real_headings(line: str) -> None:
     assert looks_like_heading(line) is True
 
 
@@ -157,17 +157,17 @@ def test_recognises_real_headings(line):
         "This is a normal sentence that ends with a period.",
     ],
 )
-def test_rejects_things_that_only_look_like_headings(line):
+def test_rejects_things_that_only_look_like_headings(line: str) -> None:
     assert looks_like_heading(line) is False
 
 
-def test_heading_depth_tracks_nesting():
+def test_heading_depth_tracks_nesting() -> None:
     assert heading_depth("5. Working Arrangements") == 1
     assert heading_depth("5.2 Remote Work") == 2
     assert heading_depth("5.2.1 Equipment") == 3
 
 
-def test_empty_input_raises():
+def test_empty_input_raises() -> None:
     with pytest.raises(ValueError):
         chunk_document([], "empty.pdf")
 
@@ -200,7 +200,7 @@ def test_empty_input_raises():
         "Section 3509 rates aren't available if you intentionally",
     ],
 )
-def test_real_world_false_positives_are_rejected(line):
+def test_real_world_false_positives_are_rejected(line: str) -> None:
     assert looks_like_heading(line) is False, line
 
 
@@ -213,11 +213,11 @@ def test_real_world_false_positives_are_rejected(line):
         "SECTION 4",
     ],
 )
-def test_real_world_headings_still_detected(line):
+def test_real_world_headings_still_detected(line: str) -> None:
     assert looks_like_heading(line) is True, line
 
 
-def test_title_case_separates_titles_from_sentences():
+def test_title_case_separates_titles_from_sentences() -> None:
     from app.chunker import is_title_case
 
     assert is_title_case("Remote Work Policy") is True
@@ -233,7 +233,7 @@ def test_title_case_separates_titles_from_sentences():
     "line",
     ["DISCUSSION", "REFERENCES", "EXAMPLES", "NOTE", "SCOPE", "GENERAL"],
 )
-def test_generic_labels_are_not_headings(line):
+def test_generic_labels_are_not_headings(line: str) -> None:
     """ "page 44 | DISCUSSION" tells the reader nothing -- reject these."""
     assert looks_like_heading(line) is False, line
 
@@ -242,11 +242,11 @@ def test_generic_labels_are_not_headings(line):
     "line",
     ["WORKPLACE SAFETY", "REMOTE WORK POLICY", "EMPLOYEE BENEFITS"],
 )
-def test_meaningful_all_caps_headings_survive(line):
+def test_meaningful_all_caps_headings_survive(line: str) -> None:
     assert looks_like_heading(line) is True, line
 
 
-def test_numbered_heading_is_not_nested_under_an_unnumbered_one():
+def test_numbered_heading_is_not_nested_under_an_unnumbered_one() -> None:
     """A numbered section owns its own hierarchy.
 
     Regression: NIST documents produced breadcrumbs like
@@ -273,7 +273,7 @@ def test_numbered_heading_is_not_nested_under_an_unnumbered_one():
         assert not section.startswith("SECURITY REQUIREMENTS >"), section
 
 
-def test_sibling_headings_do_not_nest_under_each_other():
+def test_sibling_headings_do_not_nest_under_each_other() -> None:
     """Regression: "3.1 Access Control > 3.5 Identification" was wrong.
 
     Both are depth 2, so they are siblings. The trail nested them because it
@@ -302,6 +302,6 @@ def test_sibling_headings_do_not_nest_under_each_other():
 
 
 @pytest.mark.parametrize("line", ["UTC", "AH", "PDF", "IRS"])
-def test_short_all_caps_acronyms_are_not_headings(line):
+def test_short_all_caps_acronyms_are_not_headings(line: str) -> None:
     """Running headers and acronyms are not section titles."""
     assert looks_like_heading(line) is False, line

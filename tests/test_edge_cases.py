@@ -33,7 +33,7 @@ needs_index = pytest.mark.skipif(
         ("too long", "x" * 5000),
     ],
 )
-def test_bad_input_is_refused_with_a_useful_message(label, question):
+def test_bad_input_is_refused_with_a_useful_message(label: str, question: str) -> None:
     """Never a stack trace, always a sentence telling the user what to do."""
     with pytest.raises(ValueError) as caught:
         vector_store.search(question)
@@ -57,7 +57,7 @@ def test_bad_input_is_refused_with_a_useful_message(label, question):
         ("very long word", "supercalifragilistic" * 20),
     ],
 )
-def test_odd_but_valid_input_does_not_crash(label, question):
+def test_odd_but_valid_input_does_not_crash(label: str, question: str) -> None:
     """Strange input may find nothing, but must never raise."""
     hits = vector_store.search(question)
     assert isinstance(hits, list), label
@@ -83,7 +83,7 @@ def test_odd_but_valid_input_does_not_crash(label, question):
         "What is my bank account balance?",
     ],
 )
-def test_out_of_scope_questions_get_i_dont_know(question):
+def test_out_of_scope_questions_get_i_dont_know(question: str) -> None:
     """Nothing in these documents answers these, so nothing may be invented."""
     hits = vector_store.search(question)
     result = answer_question(question, hits)
@@ -97,23 +97,36 @@ def test_out_of_scope_questions_get_i_dont_know(question):
 
 
 @needs_index
-def test_same_question_returns_the_same_sources():
-    """Retrieval is deterministic, so citations cannot drift between runs."""
-    question = "What are the rules for family employees?"
+def test_same_question_returns_the_same_sources() -> None:
+    """The same question must cite the same sources, in the same order.
+
+    This is what M6B1 (consistent output) actually requires, and it is asserted
+    strictly.
+
+    Distances are compared with a tolerance rather than exactly. A hosted
+    embedding API is not bit-reproducible: the same text embedded twice can differ
+    in the fifth decimal place, which moved distances without changing the
+    ranking. Asserting exact float equality was a valid assumption with a local
+    model and became a false failure with a hosted one -- the ordering is the
+    contract, not the float.
+    """
+    question = "How much sick leave do employees get?"
 
     first = vector_store.search(question)
     second = vector_store.search(question)
 
     assert [s.citation() for s in first] == [s.citation() for s in second]
-    assert [round(s.distance, 6) for s in first] == [
-        round(s.distance, 6) for s in second
-    ]
+    assert [s.content_type for s in first] == [s.content_type for s in second]
+    for one, two in zip(first, second, strict=True):
+        assert one.distance == pytest.approx(two.distance, abs=1e-3)
 
 
 # --- an empty or missing database ----------------------------------------
 
 
-def test_search_on_an_empty_database_returns_nothing(tmp_path, monkeypatch):
+def test_search_on_an_empty_database_returns_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A fresh install with no documents must answer, not crash."""
     monkeypatch.setattr(config, "CHROMA_DIR", tmp_path / "empty_db")
 
@@ -123,7 +136,9 @@ def test_search_on_an_empty_database_returns_nothing(tmp_path, monkeypatch):
     assert answer_question("anything at all", hits).is_dont_know
 
 
-def test_stats_survives_a_missing_database(tmp_path, monkeypatch):
+def test_stats_survives_a_missing_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """/health must answer even before anything has been ingested."""
     monkeypatch.setattr(config, "CHROMA_DIR", tmp_path / "not_created_yet")
 
@@ -136,7 +151,7 @@ def test_stats_survives_a_missing_database(tmp_path, monkeypatch):
 # --- broken files --------------------------------------------------------
 
 
-def test_corrupt_pdf_raises_a_clean_error(tmp_path):
+def test_corrupt_pdf_raises_a_clean_error(tmp_path: Path) -> None:
     """A file that claims to be a PDF but is not must fail readably."""
     from app.pdf_parser import parse_pdf
 
@@ -149,7 +164,7 @@ def test_corrupt_pdf_raises_a_clean_error(tmp_path):
     assert "corrupt" in str(caught.value).lower()
 
 
-def test_empty_file_raises_a_clean_error(tmp_path):
+def test_empty_file_raises_a_clean_error(tmp_path: Path) -> None:
     from app.pdf_parser import parse_pdf
 
     empty = tmp_path / "empty.pdf"

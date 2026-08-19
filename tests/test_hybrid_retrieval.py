@@ -30,7 +30,7 @@ needs_index = pytest.mark.skipif(
         ("What is GPIO14 used for?", "GPIO14"),
     ],
 )
-def test_identifiers_are_extracted(question, expected):
+def test_identifiers_are_extracted(question: str, expected: str) -> None:
     assert expected in identifier_terms(question)
 
 
@@ -47,12 +47,12 @@ def test_identifiers_are_extracted(question, expected):
         "Give me 3 examples.",
     ],
 )
-def test_plain_questions_yield_no_identifiers(question):
+def test_plain_questions_yield_no_identifiers(question: str) -> None:
     """This is the safety property the refusal rate depends on."""
     assert identifier_terms(question) == []
 
 
-def test_bare_numbers_are_never_identifiers():
+def test_bare_numbers_are_never_identifiers() -> None:
     """Structure is required: punctuation, or letters mixed with digits."""
     assert identifier_terms("section 5") == []
     assert identifier_terms("chapter 12") == []
@@ -73,7 +73,7 @@ def test_bare_numbers_are_never_identifiers():
         "What is GPIO14 used for?",
     ],
 )
-def test_identifier_questions_retrieve_the_identifier(question):
+def test_identifier_questions_retrieve_the_identifier(question: str) -> None:
     """The chunk containing the literal identifier must be retrieved.
 
     Before the literal pass existed, these returned either nothing or the wrong
@@ -89,7 +89,7 @@ def test_identifier_questions_retrieve_the_identifier(question):
 
 
 @needs_index
-def test_exact_matches_are_labelled_and_ranked_first():
+def test_exact_matches_are_labelled_and_ranked_first() -> None:
     """An exact hit is not a guess, so it outranks semantic matches."""
     hits = vector_store.search("What does control 03.05.03 require?")
 
@@ -109,7 +109,7 @@ def test_exact_matches_are_labelled_and_ranked_first():
         "What is the weather today?",
     ],
 )
-def test_literal_pass_does_not_leak_out_of_scope_questions(question):
+def test_literal_pass_does_not_leak_out_of_scope_questions(question: str) -> None:
     """Adding keyword matching must not weaken the anti-hallucination guard."""
     assert vector_store.search(question) == []
 
@@ -128,7 +128,7 @@ def test_literal_pass_does_not_leak_out_of_scope_questions(question):
         ("What does the EAP cover?", ["EAP"]),
     ],
 )
-def test_named_entities_are_detected(question, expected):
+def test_named_entities_are_detected(question: str, expected: list[str]) -> None:
     from app.vector_store import named_entities
 
     assert named_entities(question) == expected
@@ -146,7 +146,7 @@ def test_named_entities_are_detected(question, expected):
         "Who should I contact in an emergency?",
     ],
 )
-def test_ordinary_questions_name_no_entities(question):
+def test_ordinary_questions_name_no_entities(question: str) -> None:
     from app.vector_store import named_entities
 
     assert named_entities(question) == []
@@ -163,7 +163,7 @@ def test_ordinary_questions_name_no_entities(question):
         "Does the module support dual HDMI output?",
     ],
 )
-def test_acronyms_present_in_the_corpus_are_not_blocked(question):
+def test_acronyms_present_in_the_corpus_are_not_blocked(question: str) -> None:
     from app.vector_store import named_entities
 
     assert named_entities(question), "expected this question to name an acronym"
@@ -171,13 +171,13 @@ def test_acronyms_present_in_the_corpus_are_not_blocked(question):
 
 
 @needs_index
-def test_question_naming_an_absent_entity_is_refused():
+def test_question_naming_an_absent_entity_is_refused() -> None:
     """A near-miss: close in topic, but the corpus never mentions GDPR."""
     assert vector_store.search("What are the GDPR penalties for a data breach?") == []
 
 
 @needs_index
-def test_question_naming_a_present_entity_still_works():
+def test_question_naming_a_present_entity_still_works() -> None:
     """The guard must not block entities the documents genuinely discuss."""
     hits = vector_store.search("What does the EAP provide?")
 

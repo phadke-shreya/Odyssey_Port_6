@@ -15,9 +15,13 @@ Two rules are enforced here rather than hoped for:
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from app import config
 from app.vector_store import Retrieved
+
+if TYPE_CHECKING:  # imported lazily at runtime, see _build_llm
+    from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +90,11 @@ class Answer:
 
     @property
     def is_dont_know(self) -> bool:
+        """Whether this is a refusal rather than an answer.
+
+        A property so callers ask a question instead of string-matching the text
+        themselves, which would drift from DONT_KNOW the moment it is reworded.
+        """
         return self.text.strip().startswith("I don't know")
 
 
@@ -108,7 +117,7 @@ def format_context(sections: list[Retrieved]) -> str:
     return "\n\n".join(blocks)
 
 
-def _build_llm():
+def _build_llm() -> "ChatOpenAI":
     """Create the chat model, honouring a company gateway if one is set.
 
     Raises:
@@ -297,7 +306,8 @@ def _normalise_citations(text: str) -> str:
     more loudly in the prompt.
     """
 
-    def replace(match: re.Match) -> str:
+    def replace(match: re.Match[str]) -> str:
+        """Rewrite one matched citation into the canonical form."""
         number = match.group(1) or match.group(2)
         return "(Source {})".format(number)
 

@@ -20,6 +20,8 @@ import shutil
 from dataclasses import dataclass
 
 import chromadb
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import EmbeddingFunction
 from chromadb.utils import embedding_functions
 
 from app import config
@@ -67,7 +69,7 @@ class Retrieved:
         return " | ".join(parts)
 
 
-def _embedding_function():
+def _embedding_function() -> EmbeddingFunction:
     """Build the embedding function named by the config.
 
     The OpenAI path honours OPENAI_BASE_URL, so a company gateway needs no code
@@ -90,7 +92,7 @@ def _client() -> chromadb.ClientAPI:
     return chromadb.PersistentClient(path=str(config.CHROMA_DIR))
 
 
-def get_collection(check_fingerprint: bool = True):
+def get_collection(check_fingerprint: bool = True) -> Collection:
     """Open (or create) the collection, refusing a model mismatch.
 
     Args:
@@ -254,7 +256,7 @@ def identifier_terms(question: str) -> list[str]:
     return terms
 
 
-def _keyword_candidates(collection, terms: list[str]) -> list[dict]:
+def _keyword_candidates(collection: Collection, terms: list[str]) -> list[dict]:
     """Find chunks containing an identifier literally.
 
     Chroma's substring filter is case-sensitive, so a couple of casings are

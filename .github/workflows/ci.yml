@@ -26,10 +26,14 @@ jobs:
           pip install -r requirements.txt
 
       - name: Check formatting
-        run: black --check app tests eval streamlit_app.py ingest.py
+        run: black --check app tests eval tools streamlit_app.py ingest.py
 
       - name: Lint
-        run: ruff check app tests eval streamlit_app.py ingest.py
+        run: ruff check app tests eval tools streamlit_app.py ingest.py
+
+      # The conventions in CLAUDE.md are enforced, not just documented.
+      - name: Check CLAUDE.md conventions
+        run: python tools/check_conventions.py
 
       # Build the index with the LOCAL embedding model so CI needs no API key.
       # This exercises the whole pipeline -- parse, chunk, embed, persist -- on

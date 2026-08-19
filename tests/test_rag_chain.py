@@ -24,7 +24,7 @@ def _section(text: str, page: int = 55) -> Retrieved:
     )
 
 
-def test_sources_are_labelled_source_n_not_bracket_n():
+def test_sources_are_labelled_source_n_not_bracket_n() -> None:
     """Regression: the model copied "[50]" out of the document text.
 
     NIST documents carry their own bracketed reference markers. Labelling our
@@ -40,18 +40,18 @@ def test_sources_are_labelled_source_n_not_bracket_n():
     assert "[50]" in context
 
 
-def test_prompt_forbids_the_documents_own_reference_numbers():
+def test_prompt_forbids_the_documents_own_reference_numbers() -> None:
     assert "Source N" in PROMPT_TEMPLATE
     assert "(Source 1)" in PROMPT_TEMPLATE
     assert "NOT citations" in PROMPT_TEMPLATE
 
 
-def test_prompt_forbids_mixing_an_answer_with_i_dont_know():
+def test_prompt_forbids_mixing_an_answer_with_i_dont_know() -> None:
     assert "ENTIRE reply" in PROMPT_TEMPLATE
     assert "Never mix the two" in PROMPT_TEMPLATE
 
 
-def test_trailing_hedge_is_stripped_from_a_real_answer():
+def test_trailing_hedge_is_stripped_from_a_real_answer() -> None:
     """Regression: the app answered, then contradicted itself in the next line."""
     answered = (
         "Media sanitization requires clearing, purging, and destroying media "
@@ -65,19 +65,19 @@ def test_trailing_hedge_is_stripped_from_a_real_answer():
     assert "I don't know" not in cleaned
 
 
-def test_a_pure_dont_know_answer_is_left_alone():
+def test_a_pure_dont_know_answer_is_left_alone() -> None:
     assert _strip_contradictory_hedge(DONT_KNOW) == DONT_KNOW
     assert Answer(text=DONT_KNOW).is_dont_know is True
 
 
-def test_short_preamble_before_a_hedge_is_not_treated_as_an_answer():
+def test_short_preamble_before_a_hedge_is_not_treated_as_an_answer() -> None:
     """ "Hmm. I don't know..." is a refusal, not an answer plus a hedge."""
     text = "Hmm. " + DONT_KNOW
 
     assert _strip_contradictory_hedge(text) == text
 
 
-def test_document_reference_markers_are_removed_from_answers():
+def test_document_reference_markers_are_removed_from_answers() -> None:
     """Regression: the model wrote "[50]", a marker copied from NIST text.
 
     That number points at the document's own bibliography, not at anything the
@@ -99,7 +99,7 @@ def test_document_reference_markers_are_removed_from_answers():
     assert "SP 800-88" in cleaned
 
 
-def test_echoed_source_heading_is_removed():
+def test_echoed_source_heading_is_removed() -> None:
     """Regression: the answer began by copying the context heading line."""
     from app.rag_chain import _strip_echoed_source_header
 
@@ -117,7 +117,7 @@ def test_echoed_source_heading_is_removed():
     assert "(Source 2)" in cleaned
 
 
-def test_an_answer_that_is_only_a_heading_is_left_alone():
+def test_an_answer_that_is_only_a_heading_is_left_alone() -> None:
     """Never return an empty answer just because it was badly formatted."""
     from app.rag_chain import _strip_echoed_source_header
 
@@ -126,14 +126,14 @@ def test_an_answer_that_is_only_a_heading_is_left_alone():
     assert _strip_echoed_source_header(text) == text
 
 
-def test_prompt_shows_a_worked_example():
+def test_prompt_shows_a_worked_example() -> None:
     from app.rag_chain import PROMPT_TEMPLATE
 
     assert "Example of a GOOD answer" in PROMPT_TEMPLATE
     assert "Example of a BAD answer" in PROMPT_TEMPLATE
 
 
-def test_citation_styles_are_normalised_to_one_form():
+def test_citation_styles_are_normalised_to_one_form() -> None:
     """Small models write [Source 2], Source 2, and (source 2) interchangeably."""
     from app.rag_chain import _normalise_citations
 

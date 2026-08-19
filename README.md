@@ -172,10 +172,17 @@ curl -X POST http://127.0.0.1:8006/ask \
 ## Tests
 
 ```bash
-pytest -q                 # 126 tests
-black --check app tests   # formatting
-ruff check app tests      # linting
+pytest -q                            # 142 tests
+black --check app tests eval tools   # formatting
+ruff check app tests eval tools      # linting
+python tools/check_conventions.py    # the conventions in CLAUDE.md
 ```
+
+`tools/check_conventions.py` enforces the mechanical rules from
+[CLAUDE.md](CLAUDE.md): no f-strings, no `while` loops, no `range(len())`, no
+`os.path`, no stray `print()`, type hints on every signature, docstrings on every
+public function, no formatted strings passed to the logger, no commented-out code.
+All four checks run in CI.
 
 The two that matter most: a table must never be split, and every child chunk
 must resolve to its parent. Many of the rest are regression tests pinning real

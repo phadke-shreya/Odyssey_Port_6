@@ -29,6 +29,7 @@ QUESTIONS = Path(__file__).resolve().parent / "questions.json"
 
 
 def load() -> dict:
+    """Read the question set from disk."""
     return json.loads(QUESTIONS.read_text(encoding="utf-8"))
 
 
@@ -164,6 +165,7 @@ def sweep_threshold(cases: list[dict], out_of_scope: list[str]) -> None:
 
 
 def main() -> int:
+    """Parse arguments, run the job, and return a process exit code."""
     parser = argparse.ArgumentParser(description="Measure retrieval quality.")
     parser.add_argument("--sweep", action="store_true", help="sweep the threshold")
     args = parser.parse_args()

@@ -24,31 +24,31 @@ needs_ocr = pytest.mark.skipif(not ocr.available(), reason="tesseract is not ins
 # --- the usability rule --------------------------------------------------
 
 
-def test_good_ocr_is_usable():
+def test_good_ocr_is_usable() -> None:
     result = OcrResult(text="A" * 200, confidence=85.0)
 
     assert result.usable is True
 
 
-def test_low_confidence_ocr_is_rejected():
+def test_low_confidence_ocr_is_rejected() -> None:
     """Garbled text must not be indexed. It would be cited as fact."""
     result = OcrResult(text="A" * 200, confidence=20.0)
 
     assert result.usable is False
 
 
-def test_too_little_text_is_rejected():
+def test_too_little_text_is_rejected() -> None:
     """A handful of characters is not worth a chunk."""
     result = OcrResult(text="abc", confidence=99.0)
 
     assert result.usable is False
 
 
-def test_empty_ocr_is_rejected():
+def test_empty_ocr_is_rejected() -> None:
     assert OcrResult(text="", confidence=0.0).usable is False
 
 
-def test_confidence_ignores_tesseract_empty_boxes():
+def test_confidence_ignores_tesseract_empty_boxes() -> None:
     """image_to_data returns blank boxes with conf -1; they must not count.
 
     Including them would drag the average down and make good OCR look unusable.
@@ -63,7 +63,7 @@ def test_confidence_ignores_tesseract_empty_boxes():
     assert _mean_confidence(data) == pytest.approx(85.0)
 
 
-def test_confidence_of_nothing_is_zero():
+def test_confidence_of_nothing_is_zero() -> None:
     from app.ocr import _mean_confidence
 
     assert _mean_confidence({"conf": [], "text": []}) == 0.0
@@ -72,7 +72,7 @@ def test_confidence_of_nothing_is_zero():
 # --- graceful degradation ------------------------------------------------
 
 
-def test_ocr_is_skipped_when_disabled(monkeypatch):
+def test_ocr_is_skipped_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turning OCR off must not error -- it just yields nothing."""
     monkeypatch.setattr(config, "OCR_ENABLED", False)
 
@@ -80,7 +80,9 @@ def test_ocr_is_skipped_when_disabled(monkeypatch):
 
 
 @needs_scan
-def test_page_is_reported_unreadable_when_ocr_is_off(monkeypatch):
+def test_page_is_reported_unreadable_when_ocr_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """With OCR unavailable, the old flagging behaviour must still work.
 
     This is the fallback that keeps a scanned page visible rather than silent.
@@ -99,7 +101,7 @@ def test_page_is_reported_unreadable_when_ocr_is_off(monkeypatch):
 
 @needs_scan
 @needs_ocr
-def test_scanned_page_becomes_searchable_text():
+def test_scanned_page_becomes_searchable_text() -> None:
     """The whole point: a page with no text layer becomes readable content."""
     blocks = parse_pdf(SCAN)
 
@@ -115,7 +117,7 @@ def test_scanned_page_becomes_searchable_text():
 
 @needs_scan
 @needs_ocr
-def test_ocr_text_is_chunked_and_labelled():
+def test_ocr_text_is_chunked_and_labelled() -> None:
     """OCR text is sliced like prose, and every chunk is marked as OCR."""
     blocks = parse_pdf(SCAN)
 
@@ -126,7 +128,7 @@ def test_ocr_text_is_chunked_and_labelled():
     assert all(c.parent_text for c in chunks)
 
 
-def test_citation_warns_when_text_came_from_ocr():
+def test_citation_warns_when_text_came_from_ocr() -> None:
     """A reader must be able to tell OCR from the document's own text."""
     from app.vector_store import Retrieved
 
@@ -159,7 +161,7 @@ def test_citation_warns_when_text_came_from_ocr():
 # answers it. Packing unrelated facts into one child blurs its embedding.
 
 
-def test_ocr_text_is_split_on_its_own_paragraph_breaks():
+def test_ocr_text_is_split_on_its_own_paragraph_breaks() -> None:
     from app.chunker import _children_for_ocr
 
     text = (
@@ -176,7 +178,7 @@ def test_ocr_text_is_split_on_its_own_paragraph_breaks():
     assert any("laptops" in c and "Bangalore" not in c for c in children), children
 
 
-def test_short_ocr_fragments_are_joined_not_left_alone():
+def test_short_ocr_fragments_are_joined_not_left_alone() -> None:
     """A three-word fragment is not a fact and cannot be retrieved usefully."""
     from app.chunker import _children_for_ocr
 
@@ -187,7 +189,7 @@ def test_short_ocr_fragments_are_joined_not_left_alone():
     assert all(len(c) >= 20 for c in children), children
 
 
-def test_a_long_ocr_paragraph_is_still_size_limited():
+def test_a_long_ocr_paragraph_is_still_size_limited() -> None:
     from app.chunker import _children_for_ocr
 
     text = "word " * 400  # one enormous paragraph, no breaks
@@ -198,7 +200,7 @@ def test_a_long_ocr_paragraph_is_still_size_limited():
     assert all(len(c) <= config.CHILD_CHUNK_SIZE + 100 for c in children)
 
 
-def test_ocr_children_keep_the_whole_page_as_parent():
+def test_ocr_children_keep_the_whole_page_as_parent() -> None:
     """Split for search, whole for answering -- the parent/child rule."""
     from app.chunker import Block, chunk_document
 
@@ -216,7 +218,7 @@ def test_ocr_children_keep_the_whole_page_as_parent():
     assert all(c.parent_text == text for c in chunks)
 
 
-def test_ocr_layout_reconstruction_preserves_lines():
+def test_ocr_layout_reconstruction_preserves_lines() -> None:
     """Regression: joining every word with a space destroyed the structure.
 
     Without line breaks the chunker has nothing to cut on, so a whole page

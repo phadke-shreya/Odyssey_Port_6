@@ -190,7 +190,7 @@ def is_title_case(text: str) -> bool:
     return capitalised / len(significant) >= 0.6
 
 
-def _numbered_match(line: str):
+def _numbered_match(line: str) -> re.Match[str] | None:
     """Return a regex match if the line is a numbered heading, else None."""
     return _MULTI_LEVEL_HEADING.match(line) or _SINGLE_LEVEL_HEADING.match(line)
 
@@ -387,10 +387,11 @@ def _prose_parents(blocks: list[Block]) -> list[tuple[str, int, str]]:
             if not numbered:
                 trail.clear()
             depth = heading_depth(line)
-            # Drop every entry at this depth or deeper: those are siblings or
-            # children of what came before, not ancestors of this heading.
-            while trail and trail[-1][0] >= depth:
-                trail.pop()
+            # Keep only entries shallower than this heading: anything at this
+            # depth or deeper is a sibling or a child of what came before, not an
+            # ancestor. A filter rather than a pop-loop, per CLAUDE.md section 7 --
+            # equivalent here because the trail is always ordered by depth.
+            trail = [entry for entry in trail if entry[0] < depth]
             trail.append((depth, stripped_line))
             current_section = build_breadcrumb(trail)
             current.append((line.strip(), page))

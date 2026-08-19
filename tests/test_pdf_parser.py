@@ -25,7 +25,7 @@ needs_tables = pytest.mark.skipif(
 # --- table rendering -----------------------------------------------------
 
 
-def test_table_to_markdown_keeps_headers_with_rows():
+def test_table_to_markdown_keeps_headers_with_rows() -> None:
     rows = [
         ["Role", "Vacation Days"],
         ["Junior", "15"],
@@ -40,7 +40,7 @@ def test_table_to_markdown_keeps_headers_with_rows():
     assert "| Manager | 25 |" in markdown
 
 
-def test_table_to_markdown_handles_empty_cells():
+def test_table_to_markdown_handles_empty_cells() -> None:
     rows = [["Role", None], ["Junior", "15"]]
 
     markdown = table_to_markdown(rows)
@@ -48,7 +48,7 @@ def test_table_to_markdown_handles_empty_cells():
     assert "| Role |  |" in markdown
 
 
-def test_ragged_rows_are_padded_not_dropped():
+def test_ragged_rows_are_padded_not_dropped() -> None:
     rows = [["A", "B", "C"], ["1"], ["2", "3"]]
 
     markdown = table_to_markdown(rows)
@@ -61,25 +61,25 @@ def test_ragged_rows_are_padded_not_dropped():
 # --- layout-box rejection ------------------------------------------------
 
 
-def test_single_column_box_is_not_a_real_table():
+def test_single_column_box_is_not_a_real_table() -> None:
     """PDFs use borders for callouts; those are not data tables."""
     assert is_real_table([["Get forms faster at IRS.gov"]]) is False
     assert is_real_table([["A note"], ["spanning two lines"]]) is False
 
 
-def test_two_by_two_grid_is_a_real_table():
+def test_two_by_two_grid_is_a_real_table() -> None:
     assert is_real_table([["Role", "Days"], ["Junior", "15"]]) is True
 
 
 # --- input validation ----------------------------------------------------
 
 
-def test_missing_file_raises():
+def test_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         parse_pdf(Path("documents/does_not_exist.pdf"))
 
 
-def test_non_pdf_is_rejected(tmp_path):
+def test_non_pdf_is_rejected(tmp_path: Path) -> None:
     fake = tmp_path / "notes.txt"
     fake.write_text("this is not a pdf")
 
@@ -91,7 +91,7 @@ def test_non_pdf_is_rejected(tmp_path):
 
 
 @needs_scan
-def test_scanned_page_is_never_silently_dropped():
+def test_scanned_page_is_never_silently_dropped() -> None:
     """A page with no text layer must always leave a trace.
 
     The invariant is representation, not a particular kind: with OCR available the
@@ -117,7 +117,7 @@ def test_scanned_page_is_never_silently_dropped():
 
 
 @needs_tables
-def test_real_pdf_yields_prose_and_tables():
+def test_real_pdf_yields_prose_and_tables() -> None:
     blocks = parse_pdf(WITH_TABLES)
 
     prose = [b for b in blocks if b.content_type is ContentType.PROSE]
@@ -127,7 +127,7 @@ def test_real_pdf_yields_prose_and_tables():
 
 
 @needs_tables
-def test_every_table_chunk_starts_with_a_caption():
+def test_every_table_chunk_starts_with_a_caption() -> None:
     """The caption must be line 1, so it is always inside the embedding window."""
     blocks = parse_pdf(WITH_TABLES)
 
@@ -139,7 +139,7 @@ def test_every_table_chunk_starts_with_a_caption():
 
 
 @needs_tables
-def test_table_text_is_not_duplicated_in_prose():
+def test_table_text_is_not_duplicated_in_prose() -> None:
     """A table is stored once, as a table.
 
     The check is deliberately PER PAGE. Comparing against every page's prose

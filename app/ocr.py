@@ -17,6 +17,8 @@ Two principles here:
 import logging
 from dataclasses import dataclass
 
+from pdfplumber.page import Page
+
 from app import config
 
 logger = logging.getLogger(__name__)
@@ -136,7 +138,7 @@ def _mean_confidence(data: dict) -> float:
     return sum(scores) / len(scores)
 
 
-def ocr_page(page) -> OcrResult:
+def ocr_page(page: Page) -> OcrResult:
     """Render one PDF page to an image and read the text out of it.
 
     Args:
