@@ -10,7 +10,7 @@ config.py  ->  chunker.py  ->  pdf_parser.py  ->  vector_store.py
            ->  rag_chain.py  ->  main.py  ->  streamlit_app.py
 ```
 
-`eval/run_eval.py` sits outside that chain: it imports the app and measures
+`ocr.py` is used by `pdf_parser.py`; `eval/run_eval.py` sits outside that chain: it imports the app and measures
 retrieval quality against `eval/questions.json`. Run it after any change that
 could affect retrieval.
 
@@ -110,6 +110,28 @@ so every rule errs toward saying "not a heading".
 | `418-433` | For each prose parent: `420-421` build a unique `parent_id` like `"p15.pdf::p7"`; `422` slice into children; `423-433` create one `Chunk` per child, every one carrying the **same** `parent_text` and `parent_id`. That shared id is what de-duplication uses later. |
 | `435-460` | For each table / image block: `438-447` warn if it exceeds the embedding model's window — this is how you learn that a big table is being silently truncated. `450-460` create **one** chunk where `text` and `parent_text` are **the same value**. That is the table rule in code: its own parent, its own only child, never sliced. |
 | `462-463` | Log the count and return. |
+
+---
+
+# `app/ocr.py` — reading pages that have no text
+
+**Why this file exists:** embeddings cannot see pictures, so a scanned page is
+invisible to search. OCR turns the picture back into text, after which it behaves
+like any other page — chunked, embedded, retrieved, cited and quotable.
+
+| Lines | What it does |
+|---|---|
+| `1-16` | Docstring stating the two principles: OCR is a **fallback**, never the first choice; and **low-confidence OCR is worse than none**, because garbled text gets quoted back as if the document said it. |
+| `~24` | `_availability_logged` — module-level flag so a missing binary is reported **once**, not on every page of every document. |
+| `~28-48` | **`OcrResult`** — text plus a confidence score out of 100. `usable` requires **both** enough characters and enough confidence: a handful of characters is not worth a chunk, and low-confidence output is actively harmful. |
+| `~51-76` | **`available()`** — checks rather than assumes. `pytesseract` is a thin wrapper around a binary, so the import succeeding proves nothing; it calls `get_tesseract_version()`. The error message names the install command for both macOS and Linux. |
+| `~79-118` | **`reconstruct_layout()`** — rebuilds lines and paragraphs from Tesseract's per-word `block_num` / `par_num` / `line_num`. **This exists because of a real bug:** joining every word with a space flattened the page to one line, and since the chunker cuts on paragraph breaks first, a whole page then became one chunk no matter how many separate facts it held. |
+| `~121-146` | **`_mean_confidence()`** — averages per-word confidence, skipping Tesseract's blank boxes (which report `-1`). Including them would drag the average down and make good OCR look unusable. |
+| `~149-190` | **`ocr_page()`** — renders at `OCR_DPI` and reads the text. Every failure path returns empty text with zero confidence **rather than raising**: a page that cannot be OCR'd should fall back to being reported unreadable, not break the document. |
+
+**Where it is called:** `pdf_parser.parse_pdf()` tries OCR only when a page has
+almost no extractable text *and* no table. That keeps ingest fast — a 205-page
+manual with one scanned page pays for one page.
 
 ---
 

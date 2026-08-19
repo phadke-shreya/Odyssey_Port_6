@@ -90,6 +90,25 @@ CHUNK_WARN_CHARS = (
     _HOSTED_LIMIT_CHARS if EMBEDDING_PROVIDER == "openai" else _LOCAL_LIMIT_CHARS
 )
 
+# --- OCR (reading pages that have no text layer) -------------------------
+# Only pages with no extractable text are OCR'd, so a long document with one
+# scanned page pays for one page. Set OCR_ENABLED=false to skip it entirely.
+OCR_ENABLED = os.getenv("OCR_ENABLED", "true").strip().lower() not in {
+    "false",
+    "0",
+    "no",
+}
+
+# 300dpi is the usual sweet spot: 150 loses small print, 600 is slower with
+# little gain. Roughly 0.6s per page.
+OCR_DPI = int(os.getenv("OCR_DPI", "300"))
+
+# Below these, the OCR output is discarded and the page is reported as
+# unreadable. Garbled text is worse than no text: it pollutes search results and
+# can be quoted back to the user as though the document said it.
+OCR_MIN_CONFIDENCE = float(os.getenv("OCR_MIN_CONFIDENCE", "55"))
+OCR_MIN_CHARS = int(os.getenv("OCR_MIN_CHARS", "40"))
+
 # --- Retrieval -----------------------------------------------------------
 TOP_K_CHILDREN = 8  # fetched, then de-duplicated by parent
 TOP_K_PARENTS = 4  # unique parents actually sent to the model

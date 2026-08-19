@@ -164,6 +164,7 @@ someone asks about *"vacation days"*.
 
 | Tool | Job | Why this one |
 |---|---|---|
+| **Tesseract** | Read scanned pages | Turns a picture of text back into text, which the embedding model can then treat like any other page. Only runs on pages with no text layer, so a 205-page manual with one scan pays for one page. |
 | **pdfplumber** | Read PDFs | It extracts **tables as tables**. PyPDF2 gives you text soup where you cannot tell which number belongs to which column. |
 | **LangChain** | Split text, talk to the model | Its splitter cuts at the *nicest available seam* (paragraph → sentence → space → mid-word only as a last resort). It also gives one interface for any OpenAI-compatible model, which is why swapping OpenAI for a local model was a config change, not a rewrite. |
 | **ChromaDB** | Store and search the numbers | Persists to a folder on disk, so restarting doesn't lose the work. Understands "nearest neighbour" natively. Runs in-process — no separate database server to install. |
@@ -232,7 +233,8 @@ hybrid retrieval, the second guard, and the eval harness.
 
 | Weakness | Why | What we do |
 |---|---|---|
-| **Scanned pages** | Embeddings cannot read pictures | Detected and flagged; OCR not implemented |
+| **OCR misreads characters** | Tesseract confuses `C`/`G`, `5`/`S`, and loses spaces | Every OCR citation is labelled, and output below 55% confidence is thrown away |
+| **Pages that are truly pictures** | OCR recovers words; a diagram has none | Still reported as unreadable. Describing an image needs a vision model. |
 | **Counting questions** | "How many X in total?" needs every chunk; we fetch 8 | Inherent to RAG. Say so honestly. |
 | **Single turn only** | No conversation memory | A follow-up like "and for managers?" is treated as a fresh question |
 | **The entity guard only knows acronyms** | "the European privacy regulation" names GDPR without saying GDPR | That near-miss falls back to the distance threshold alone |
@@ -249,6 +251,8 @@ hybrid retrieval, the second guard, and the eval harness.
 - ~~Topical near-misses slip through~~ → the named-entity guard catches them
 - ~~The threshold was tuned by eye~~ → chosen from a measured sweep, and the
   numbers are recorded in `config.py`
+- ~~Scanned pages could not be searched at all~~ → OCR reads them; zero pages in
+  the current corpus are unreadable
 
 ## 8. Who would use this, and what it saves
 

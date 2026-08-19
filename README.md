@@ -15,7 +15,7 @@ Built with FastAPI, LangChain, ChromaDB and Streamlit.
 | **Parent/child chunking** | Small chunks are embedded for precise search; the whole surrounding section is what the model reads. Search small, answer big. |
 | **Section-aware boundaries** | Parents come from the document's own headings (`5.2 Remote Work Policy`), so citations name a section, not just a page. Falls back safely on documents with no numbering. |
 | **Tables are never split** | A table is one chunk, always, because rows are meaningless without their column headers. It also gets a caption so it is findable. |
-| **Scanned pages are flagged, not dropped** | A page with no extractable text becomes a visible placeholder. A known gap beats a silent one. |
+| **Scanned pages are read, not skipped** | A page with no text layer is OCR'd and becomes searchable, with every citation marked `OCR - may contain errors`. Low-confidence output is discarded rather than indexed -- garbled text is worse than absent text, because it gets quoted as fact. |
 | **Hybrid retrieval** | Vector search finds meaning; an exact-identifier pass finds `Table 2-2`, `Policy #37`, `03.05.03`. Embeddings are poor at codes -- this took identifier questions from 62% to 100%. |
 | **"I don't know" is structural** | Two guards, both *before* the model is called: a distance threshold, and a check that any entity the question names (GDPR, HIPAA) is actually mentioned in what was retrieved. |
 | **Answers cannot lose their sources** | Text and citations travel in one object; no code path returns text alone. |
@@ -37,6 +37,9 @@ Built with FastAPI, LangChain, ChromaDB and Streamlit.
   yet and the install fails. Check with `python3 --version`.
 - An **OpenAI API key** for writing answers. Optional: without one, searching and
   citations still work fully, only the final answer sentence is missing.
+- **Tesseract**, optional, for reading scanned pages: `brew install tesseract`
+  (macOS) or `apt-get install tesseract-ocr` (Linux). Without it the app still
+  runs and such pages are reported as unreadable.
 
 ---
 
@@ -226,7 +229,8 @@ refused, so `config.py` keys the value by model name.
 ```
 app/
   config.py        every tunable setting, in one place
-  pdf_parser.py    read -> clean -> classify (prose / table / image-only)
+  pdf_parser.py    read -> clean -> classify (prose / table / OCR / unreadable)
+  ocr.py           read text out of pages that have no text layer
   chunker.py       section detection -> parents -> children
   vector_store.py  embed, persist to ChromaDB, retrieve, expand to parents
   rag_chain.py     prompt -> model -> answer + citations
@@ -286,8 +290,15 @@ tension: a lower threshold refuses more but starts dropping real answers.
 
 Stated plainly, because knowing where a system is weak is part of using it.
 
-- **Scanned pages are not readable.** They are detected and flagged, not
-  transcribed. OCR would fix this and is not implemented.
+- **OCR is imperfect and labelled as such.** Scanned pages are read by Tesseract,
+  but it misreads characters (`ACME CORP` came back as `ACME GORP`). Every OCR
+  citation says so, and output below 55% confidence is discarded rather than
+  indexed. Do not trust exact figures from an OCR source without checking the
+  original.
+- **Pages that are genuinely pictures stay unreadable.** OCR recovers *words*. A
+  wiring diagram or a photo with no text yields nothing useful, and such pages are
+  still reported as unreadable. Describing an image would need a vision language
+  model, which is not implemented.
 - **Counting and totalling questions are weak.** "How many X in total?" needs
   every chunk; retrieval fetches a handful. This is inherent to RAG.
 - **Single turn only.** There is no conversation memory, so a follow-up like

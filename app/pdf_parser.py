@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pdfplumber
 
-from app import config
+from app import config, ocr
 from app.chunker import Block, ContentType
 
 logger = logging.getLogger(__name__)
@@ -213,6 +213,7 @@ def parse_pdf(path: Path) -> list[Block]:
     raw_texts: list[str] = []
     table_rows: list[tuple[int, str]] = []
     image_pages: list[int] = []
+    ocr_pages: list[tuple[int, str, float]] = []
 
     try:
         opened = pdfplumber.open(path)
@@ -258,7 +259,13 @@ def parse_pdf(path: Path) -> list[Block]:
 
             # An image-only page is one with almost no text AND no table.
             if len(body.strip()) < config.MIN_CHARS_FOR_TEXT_PAGE and not found:
-                image_pages.append(page.page_number)
+                # Try OCR before declaring it unreadable. Only these pages are
+                # OCR'd, so a long document with one scan pays for one page.
+                result = ocr.ocr_page(page)
+                if result.usable:
+                    ocr_pages.append((page.page_number, result.text, result.confidence))
+                else:
+                    image_pages.append(page.page_number)
 
     repeated = _repeated_lines(raw_texts)
 
@@ -273,6 +280,17 @@ def parse_pdf(path: Path) -> list[Block]:
         blocks.append(
             Block(text=markdown, page=page_number, content_type=ContentType.TABLE)
         )
+
+    for page_number, text, confidence in ocr_pages:
+        logger.info(
+            "Page %s of %s had no text layer; OCR recovered %s characters "
+            "at %.0f%% confidence",
+            page_number,
+            source,
+            len(text),
+            confidence,
+        )
+        blocks.append(Block(text=text, page=page_number, content_type=ContentType.OCR))
 
     for page_number in image_pages:
         logger.warning(
@@ -297,10 +315,11 @@ def parse_pdf(path: Path) -> list[Block]:
         raise ValueError("No usable content extracted from {}".format(source))
 
     logger.info(
-        "%s: %s prose, %s tables, %s image-only pages",
+        "%s: %s prose, %s tables, %s OCR pages, %s unreadable pages",
         source,
         sum(1 for b in blocks if b.content_type is ContentType.PROSE),
         len(table_rows),
+        len(ocr_pages),
         len(image_pages),
     )
     return blocks

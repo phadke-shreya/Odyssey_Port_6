@@ -59,6 +59,11 @@ class Retrieved:
         parts = [self.source, "page {}".format(self.page)]
         if self.section:
             parts.append(self.section)
+        # OCR text is a machine's reading of a picture, not the document's own
+        # text layer. Saying so is the difference between a citation the reader
+        # can trust and one they cannot.
+        if self.content_type == "ocr":
+            parts.append("OCR - may contain errors")
         return " | ".join(parts)
 
 

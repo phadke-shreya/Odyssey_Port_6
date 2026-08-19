@@ -759,3 +759,26 @@ reality differed, because that is the interesting part.
   decisions (chunk size, threshold) had to be revisited once numbers existed.
 - **Choose the documents for the demo story first.** Rebuilding the index around
   the right corpus late meant re-running everything.
+
+### OCR (built after the fact)
+
+The plan listed OCR as "only if I have time", with a warning that the system
+installs could eat an hour. In the end it took about two hours, and the install
+was a non-issue -- page rendering was already available through `pypdfium2`, a
+pdfplumber dependency, so no `poppler` was needed.
+
+Two bugs in my own OCR code, both found by measuring rather than assuming:
+
+1. **Joining every word with a space destroyed the page structure.** The chunker
+   cuts on paragraph and line breaks first, so a page flattened to one line could
+   not be split at all. Tesseract reports block, paragraph and line numbers per
+   word; I had discarded them.
+2. **One chunk holding six unrelated facts blurs its own embedding.** Measured on
+   a scanned notice: the query "when must employees collect their laptops?" scored
+   0.582 against the whole page (refused) but 0.229 against just the sentence that
+   answers it. A dilution cost of 0.353 -- more than the entire threshold margin.
+   Fixed by splitting OCR text on the page's own paragraph breaks, the same
+   principle as using headings for prose.
+
+The second is the more interesting finding: it is the parent/child design being
+justified by numbers on a case the plan never anticipated.

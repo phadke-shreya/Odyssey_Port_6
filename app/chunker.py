@@ -29,6 +29,9 @@ class ContentType(StrEnum):
     PROSE = "prose"
     TABLE = "table"
     IMAGE_ONLY = "image_only"
+    # Text recovered from a picture by OCR. Chunked like prose, but labelled
+    # separately so citations can warn that it may contain errors.
+    OCR = "ocr"
 
 
 @dataclass
@@ -108,6 +111,10 @@ _SMALL_WORDS = frozenset(
 )
 
 _WORDS = re.compile(r"[A-Za-z][A-Za-z'\u2019-]*")
+
+# Below this an OCR paragraph is a fragment, not a fact, so it is joined to its
+# neighbour instead of becoming a chunk nobody can retrieve.
+_MIN_OCR_CHILD_CHARS = 40
 
 # Dot leaders ". . . . 14" mark a table-of-contents entry. The same heading
 # appears again in the body, so indexing the TOC version just adds a duplicate
@@ -411,6 +418,50 @@ def _children_for(text: str) -> list[str]:
     return [piece for piece in splitter.split_text(text) if piece.strip()]
 
 
+def _children_for_ocr(text: str) -> list[str]:
+    """Slice OCR text into children, one recovered paragraph at a time.
+
+    A scanned page is often a list of unrelated single lines -- a heading, a
+    closure notice, a laptop deadline, a contact address -- rather than flowing
+    prose. Packing those into one 400-character child blurs its embedding across
+    every fact in it, and then no single fact retrieves well.
+
+    Measured on one such page: the query "when must employees collect their
+    laptops?" scored 0.582 against the whole page (refused) and 0.229 against just
+    the sentence that answers it (retrieved). That is a dilution cost of 0.353,
+    which is more than the entire margin of the relevance threshold.
+
+    So the page's own paragraph breaks decide the cuts -- the same principle as
+    using headings for prose. The parent is still the whole page, so an answer
+    keeps full context.
+    """
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    children: list[str] = []
+    pending = ""
+
+    for paragraph in paragraphs:
+        # A fragment on its own carries no meaning, so join it to the next one.
+        candidate = "{}\n{}".format(pending, paragraph) if pending else paragraph
+        if len(candidate) < _MIN_OCR_CHILD_CHARS:
+            pending = candidate
+            continue
+        if len(candidate) <= config.CHILD_CHUNK_SIZE:
+            children.append(candidate)
+        else:
+            children.extend(_children_for(candidate))
+        pending = ""
+
+    if pending:
+        # Whatever is left is too short to stand alone: attach it to the previous
+        # child rather than creating a meaningless one.
+        if children:
+            children[-1] = "{}\n{}".format(children[-1], pending)
+        else:
+            children.append(pending)
+
+    return children
+
+
 def chunk_document(blocks: list[Block], filename: str) -> list[Chunk]:
     """Split parsed blocks into child chunks ready for embedding.
 
@@ -435,10 +486,14 @@ def chunk_document(blocks: list[Block], filename: str) -> list[Chunk]:
     chunks: list[Chunk] = []
     counter = 0
 
-    # Tables and image placeholders are handled per block; prose is grouped
-    # across blocks so that a section can span a page break.
+    # Prose is grouped across blocks so a section can span a page break. OCR text
+    # is per page (a scanned page has no reliable heading structure to follow), and
+    # tables and placeholders are one chunk each.
     prose_blocks = [b for b in blocks if b.content_type is ContentType.PROSE]
-    other_blocks = [b for b in blocks if b.content_type is not ContentType.PROSE]
+    ocr_blocks = [b for b in blocks if b.content_type is ContentType.OCR]
+    other_blocks = [
+        b for b in blocks if b.content_type not in (ContentType.PROSE, ContentType.OCR)
+    ]
 
     if prose_blocks:
         for text, page, section in _prose_parents(prose_blocks):
@@ -456,6 +511,25 @@ def chunk_document(blocks: list[Block], filename: str) -> list[Chunk]:
                         content_type=ContentType.PROSE.value,
                     )
                 )
+
+    # OCR text is prose, so it is sliced into children for precise retrieval --
+    # but each page is its own parent, because a scan carries no section headings
+    # to group by.
+    for block in ocr_blocks:
+        counter += 1
+        parent_id = "{}::p{}".format(filename, counter)
+        for child in _children_for_ocr(block.text):
+            chunks.append(
+                Chunk(
+                    text=child,
+                    parent_id=parent_id,
+                    parent_text=block.text,
+                    source=filename,
+                    page=block.page,
+                    section="",
+                    content_type=ContentType.OCR.value,
+                )
+            )
 
     for block in other_blocks:
         counter += 1

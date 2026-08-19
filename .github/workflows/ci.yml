@@ -16,6 +16,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # The OCR path needs the tesseract binary, not just the python wrapper.
+      - name: Install tesseract
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

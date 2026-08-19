@@ -146,6 +146,8 @@ if asked and question.strip():
                     label += "  ·  table"
                 elif source["content_type"] == "image_only":
                     label += "  ·  unreadable page"
+                elif source["content_type"] == "ocr":
+                    label += "  ·  ⚠️ read by OCR"
                 if source.get("match_type") == "exact":
                     label += "  ·  exact match"
                 with st.expander(label):

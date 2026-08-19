@@ -1,6 +1,13 @@
 # --- PDF parsing ---
 pdfplumber
 
+# --- OCR for pages with no text layer ---
+# Needs the tesseract binary too:
+#   macOS: brew install tesseract
+#   Linux: apt-get install tesseract-ocr
+# Without it the app still runs; scanned pages are reported as unreadable.
+pytesseract
+
 # --- Chunking (LangChain) ---
 langchain
 langchain-openai
